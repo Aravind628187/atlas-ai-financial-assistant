@@ -1,0 +1,272 @@
+// Atlas AI — Mission Control dashboard logic.
+// Talks only to the read-only /api/* endpoints served alongside this file.
+
+const API = "/api";
+
+const el = (sel, root = document) => root.querySelector(sel);
+const els = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+// ---------------------------------------------------------------- routing
+function initNav() {
+  els(".nav-item").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      els(".nav-item").forEach((b) => b.classList.remove("is-active"));
+      els(".view").forEach((v) => v.classList.remove("is-active"));
+      btn.classList.add("is-active");
+      el(`#view-${btn.dataset.view}`).classList.add("is-active");
+    });
+  });
+}
+
+// ---------------------------------------------------------------- fetch helpers
+async function getJSON(path) {
+  try {
+    const res = await fetch(`${API}${path}`);
+    if (!res.ok) throw new Error(res.statusText);
+    return await res.json();
+  } catch (err) {
+    console.warn("Atlas dashboard: request failed", path, err);
+    return null;
+  }
+}
+
+function timeAgo(iso) {
+  if (!iso) return "—";
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+function fmtTime(iso) {
+  if (!iso) return "--:--";
+  const d = new Date(iso);
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+// ---------------------------------------------------------------- overview
+async function loadOverview() {
+  const stats = await getJSON("/overview");
+  const container = el("#hero-stats");
+  if (!stats) {
+    el("#connection-status").textContent = "waiting for backend…";
+    container.innerHTML = `<div class="stat"><span class="stat-value">—</span><span class="stat-label">Start the server to see live stats</span></div>`;
+    return;
+  }
+  el("#connection-status").textContent = "live";
+  container.innerHTML = `
+    <div class="stat"><span class="stat-value">${stats.total_users}</span><span class="stat-label">Users</span></div>
+    <div class="stat"><span class="stat-value">${stats.onboarding_completion_pct}%</span><span class="stat-label">Onboarded</span></div>
+    <div class="stat"><span class="stat-value">${stats.messages_last_24h}</span><span class="stat-label">Msgs / 24h</span></div>
+    <div class="stat"><span class="stat-value">${stats.active_alerts}</span><span class="stat-label">Active alerts</span></div>
+    <div class="stat"><span class="stat-value">${stats.briefings_sent}</span><span class="stat-label">Briefings sent</span></div>
+  `;
+}
+
+async function loadVolumeChart() {
+  const data = await getJSON("/messages/volume?days=7");
+  const ctx = el("#chart-volume");
+  const labels = (data || []).map((d) => d.date.slice(5));
+  const counts = (data || []).map((d) => d.count);
+
+  new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: labels.length ? labels : ["—"],
+      datasets: [
+        {
+          data: counts.length ? counts : [0],
+          borderColor: "#2F6FED",
+          backgroundColor: (context) => {
+            const g = context.chart.ctx.createLinearGradient(0, 0, 0, 160);
+            g.addColorStop(0, "rgba(47,111,237,.35)");
+            g.addColorStop(1, "rgba(47,111,237,0)");
+            return g;
+          },
+          fill: true,
+          tension: 0.35,
+          pointRadius: 0,
+          borderWidth: 2,
+        },
+      ],
+    },
+    options: {
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: "#5A6483", font: { family: "JetBrains Mono", size: 10 } } },
+        y: { grid: { color: "#212B4A" }, ticks: { color: "#5A6483", font: { family: "JetBrains Mono", size: 10 } } },
+      },
+    },
+  });
+}
+
+async function loadSymbolsChart() {
+  const data = (await getJSON("/symbols/popular?limit=8")) || [];
+  const ctx = el("#chart-symbols");
+  new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: data.length ? data.map((d) => d.symbol) : ["No data yet"],
+      datasets: [
+        {
+          data: data.length ? data.map((d) => d.count) : [0],
+          backgroundColor: "#34D8A6",
+          borderRadius: 6,
+          maxBarThickness: 28,
+        },
+      ],
+    },
+    options: {
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: "#8792B0", font: { family: "JetBrains Mono", size: 11 } } },
+        y: { grid: { color: "#212B4A" }, ticks: { color: "#5A6483", font: { size: 10 } } },
+      },
+    },
+  });
+  renderOrbitSymbols(data.map((d) => d.symbol).slice(0, 6));
+  renderSymbolBars(data);
+}
+
+function renderOrbitSymbols(symbols) {
+  const g = el("#orbit-symbols");
+  if (!g) return;
+  g.innerHTML = "";
+  const radius = 190;
+  const cx = 210, cy = 210;
+  const demo = symbols.length ? symbols : ["AAPL", "TSLA", "NVDA", "MSFT"];
+  demo.forEach((sym, i) => {
+    const angle = (i / demo.length) * 2 * Math.PI - Math.PI / 2;
+    const x = cx + radius * Math.cos(angle);
+    const y = cy + radius * Math.sin(angle);
+    const dot = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+    dot.setAttribute("cx", x);
+    dot.setAttribute("cy", y);
+    dot.setAttribute("r", 3.5);
+    dot.setAttribute("class", "orbit-symbol-dot");
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.setAttribute("x", x);
+    label.setAttribute("y", y - 10);
+    label.setAttribute("text-anchor", "middle");
+    label.setAttribute("class", "orbit-symbol");
+    label.textContent = sym;
+    g.appendChild(dot);
+    g.appendChild(label);
+  });
+}
+
+function renderSymbolBars(data) {
+  const container = el("#symbol-bars");
+  if (!container) return;
+  if (!data.length) {
+    container.innerHTML = `<div class="feed-empty">No tickers tracked yet — add one from the bot to see it here.</div>`;
+    return;
+  }
+  const max = Math.max(...data.map((d) => d.count));
+  container.innerHTML = data
+    .map(
+      (d) => `
+      <div class="bar-row">
+        <span class="bar-sym">${d.symbol}</span>
+        <div class="bar-track"><div class="bar-fill" style="width:${(d.count / max) * 100}%"></div></div>
+        <span class="bar-count">${d.count}</span>
+      </div>`
+    )
+    .join("");
+
+  el("#alert-mini-stats").innerHTML = `
+    <div class="mini-stat"><b>${data.length}</b><span>symbols tracked</span></div>
+    <div class="mini-stat"><b>±5%</b><span>default threshold</span></div>
+  `;
+}
+
+// ---------------------------------------------------------------- feed
+function feedRow(m) {
+  const roleClass = m.role === "user" ? "user" : "assistant";
+  return `
+    <div class="feed-row">
+      <span class="feed-time">${fmtTime(m.created_at)}</span>
+      <span class="feed-role ${roleClass}">${m.role}</span>
+      <span class="feed-content">${escapeHtml(m.content || "")}</span>
+      <span class="feed-intent">${m.intent || ""}</span>
+    </div>`;
+}
+
+function escapeHtml(str) {
+  const d = document.createElement("div");
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+async function loadFeed(targetSelector, countSelector, limit) {
+  const data = (await getJSON(`/messages/recent?limit=${limit}`)) || [];
+  const target = el(targetSelector);
+  if (countSelector) el(countSelector).textContent = `${data.length} recent`;
+  target.innerHTML = data.length ? data.map(feedRow).join("") : `<div class="feed-empty">No conversations yet — say hi to the bot on Telegram, or run scripts/seed_demo_data.py.</div>`;
+}
+
+// ---------------------------------------------------------------- users
+async function loadUsers() {
+  const data = (await getJSON("/users?limit=50")) || [];
+  const tbody = el("#users-table tbody");
+  if (!data.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="feed-empty">No users yet.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = data
+    .map((u) => {
+      const name = u.first_name || u.username || `User #${u.id}`;
+      const pillClass = u.onboarding_stage === "done" ? "done" : "progress";
+      const pillLabel = u.onboarding_stage === "done" ? "Active" : "Onboarding";
+      return `
+      <tr>
+        <td>${escapeHtml(name)}${u.username ? ` <span style="color:var(--text-dim)">@${escapeHtml(u.username)}</span>` : ""}</td>
+        <td>${u.role || "—"}</td>
+        <td><span class="pill ${pillClass}">${pillLabel}</span></td>
+        <td>${u.message_count}</td>
+        <td>${u.watchlist_size}</td>
+        <td>${timeAgo(u.last_active_at)}</td>
+      </tr>`;
+    })
+    .join("");
+}
+
+// ---------------------------------------------------------------- briefings
+async function loadBriefings() {
+  const data = (await getJSON("/briefings/recent?limit=25")) || [];
+  const target = el("#feed-briefings");
+  if (!data.length) {
+    target.innerHTML = `<div class="feed-empty">No briefings sent yet.</div>`;
+    return;
+  }
+  target.innerHTML = data
+    .map(
+      (b) => `
+      <div class="feed-row" style="grid-template-columns: 70px 100px 1fr;">
+        <span class="feed-time">${fmtTime(b.created_at)}</span>
+        <span class="feed-role assistant">${b.kind.replace("_", " ")}</span>
+        <span class="feed-content">${escapeHtml(b.content)}</span>
+      </div>`
+    )
+    .join("");
+}
+
+// ---------------------------------------------------------------- boot
+async function boot() {
+  initNav();
+  await Promise.all([
+    loadOverview(),
+    loadVolumeChart(),
+    loadSymbolsChart(),
+    loadFeed("#feed-overview", "#feed-count", 12),
+    loadFeed("#feed-full", null, 60),
+    loadUsers(),
+    loadBriefings(),
+  ]);
+}
+
+boot();
+setInterval(boot, 30000); // keep the dashboard live without a manual refresh

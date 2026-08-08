@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
+
+  <meta
+    name="description"
+    content="Atlas AI Mission Control Dashboard"
+  />
+
+  <title>Atlas AI — Mission Control</title>
+
+  <!-- Dashboard styles -->
+  <link rel="stylesheet" href="/style.css" />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  />
+</head>
+
+<body>
+
+  <div class="app-shell">
+
+    <!-- ======================================================
+         SIDEBAR
+    ======================================================= -->
+    <aside class="sidebar">
+
+      <!-- Logo / Brand -->
+      <div class="brand">
+
+        <div class="brand-logo">
+          <img
+            src="/assets/logo.png"
+            alt="Atlas AI Logo"
+          />
+        </div>
+
+        <div class="brand-copy">
+
+          <div class="brand-name">
+            ATLAS<span>AI</span>
+          </div>
+
+          <div class="brand-sub">
+            Mission Control
+          </div>
+
+        </div>
+
+      </div>
+
+
+      <!-- Navigation -->
+      <nav class="nav">
+
+        <button
+          class="nav-item is-active"
+          data-view="overview"
+          type="button"
+        >
+          <span class="nav-dot"></span>
+          Overview
+        </button>
+
+
+        <button
+          class="nav-item"
+          data-view="conversations"
+          type="button"
+        >
+          <span class="nav-dot"></span>
+          Conversations
+        </button>
+
+
+        <button
+          class="nav-item"
+          data-view="users"
+          type="button"
+        >
+          <span class="nav-dot"></span>
+          Users
+        </button>
+
+
+        <button
+          class="nav-item"
+          data-view="watchlists"
+          type="button"
+        >
+          <span class="nav-dot"></span>
+          Watchlists &amp; Alerts
+        </button>
+
+
+        <button
+          class="nav-item"
+          data-view="briefings"
+          type="button"
+        >
+          <span class="nav-dot"></span>
+          Briefings
+        </button>
+
+      </nav>
+
+
+      <!-- Sidebar status -->
+      <div class="sidebar-footer">
+
+        <div class="pulse-row">
+
+          <span class="pulse-dot"></span>
+
+          <span id="connection-status">
+            connecting…
+          </span>
+
+        </div>
+
+        <p class="footer-note">
+          Reads live from the Atlas database.
+          <br />
+          No data leaves this page.
+        </p>
+
+      </div>
+
+    </aside>
+
+
+    <!-- ======================================================
+         MAIN CONTENT
+    ======================================================= -->
+    <main class="main-content">
+
+
+      <!-- ====================================================
+           OVERVIEW
+      ===================================================== -->
+      <section
+        class="view is-active"
+        id="view-overview"
+      >
+
+        <header class="hero">
+
+
+          <!-- Hero text -->
+          <div class="hero-copy">
+
+            <p class="eyebrow">
+              Finance-first AI assistant · lives in Telegram
+            </p>
+
+            <h1>
+              Atlas is watching
+              <span class="accent">
+                so you don't have to.
+              </span>
+            </h1>
+
+            <p class="hero-sub">
+              One assistant across market data,
+              company research, filings, and your inbox —
+              proactive when it matters,
+              silent when it doesn't.
+            </p>
+
+
+            <!-- Dynamic stats -->
+            <div
+              class="hero-stats"
+              id="hero-stats"
+            >
+            </div>
+
+          </div>
+
+
+          <!-- Hero Orbit -->
+          <div
+            class="hero-orbit"
+            id="hero-orbit"
+            aria-hidden="true"
+          >
+
+            <svg
+              viewBox="0 0 420 420"
+              class="orbit-svg"
+            >
+
+              <circle
+                cx="210"
+                cy="210"
+                r="90"
+                class="orbit-ring ring-1"
+              ></circle>
+
+              <circle
+                cx="210"
+                cy="210"
+                r="140"
+                class="orbit-ring ring-2"
+              ></circle>
+
+              <circle
+                cx="210"
+                cy="210"
+                r="190"
+                class="orbit-ring ring-3"
+              ></circle>
+
+
+              <circle
+                cx="210"
+                cy="210"
+                r="46"
+                class="orbit-core"
+              ></circle>
+
+
+              <text
+                x="210"
+                y="205"
+                class="orbit-core-label"
+                text-anchor="middle"
+              >
+                ATLAS
+              </text>
+
+
+              <text
+                x="210"
+                y="222"
+                class="orbit-core-sub"
+                text-anchor="middle"
+              >
+                LIVE
+              </text>
+
+
+              <!-- Symbols added by app.js -->
+              <g id="orbit-symbols"></g>
+
+            </svg>
+
+          </div>
+
+        </header>
+
+
+        <!-- ==================================================
+             CHARTS
+        =================================================== -->
+        <div class="grid-2">
+
+
+          <!-- Message volume -->
+          <div class="card">
+
+            <div class="card-head">
+
+              <h3>
+                Message volume
+              </h3>
+
+              <span class="card-sub">
+                last 7 days
+              </span>
+
+            </div>
+
+
+            <div class="chart-container">
+
+              <canvas
+                id="chart-volume"
+              ></canvas>
+
+            </div>
+
+          </div>
+
+
+          <!-- Symbols chart -->
+          <div class="card">
+
+            <div class="card-head">
+
+              <h3>
+                Most tracked symbols
+              </h3>
+
+              <span class="card-sub">
+                across all users
+              </span>
+
+            </div>
+
+
+            <div class="chart-container">
+
+              <canvas
+                id="chart-symbols"
+              ></canvas>
+
+            </div>
+
+          </div>
+
+        </div>
+
+
+        <!-- ==================================================
+             LIVE CONVERSATION FEED
+        =================================================== -->
+        <div class="card">
+
+          <div class="card-head">
+
+            <h3>
+              Live conversation feed
+            </h3>
+
+            <span
+              class="card-sub"
+              id="feed-count"
+            >
+              —
+            </span>
+
+          </div>
+
+
+          <div
+            class="feed"
+            id="feed-overview"
+          >
+          </div>
+
+        </div>
+
+      </section>
+
+
+
+      <!-- ====================================================
+           CONVERSATIONS
+      ===================================================== -->
+      <section
+        class="view"
+        id="view-conversations"
+      >
+
+        <div class="view-header">
+
+          <h2>
+            Conversations
+          </h2>
+
+          <p class="view-sub">
+            Every turn Atlas has had across every user —
+            text, transcribed voice, and document uploads.
+          </p>
+
+        </div>
+
+
+        <div class="card">
+
+          <div
+            class="feed feed-tall"
+            id="feed-full"
+          >
+          </div>
+
+        </div>
+
+      </section>
+
+
+
+      <!-- ====================================================
+           USERS
+      ===================================================== -->
+      <section
+        class="view"
+        id="view-users"
+      >
+
+        <div class="view-header">
+
+          <h2>
+            Users
+          </h2>
+
+          <p class="view-sub">
+            Who's onboarded, their role,
+            and how engaged they are.
+          </p>
+
+        </div>
+
+
+        <div class="card">
+
+          <div class="table-wrapper">
+
+            <table
+              class="data-table"
+              id="users-table"
+            >
+
+              <thead>
+
+                <tr>
+                  <th>User</th>
+                  <th>Role</th>
+                  <th>Stage</th>
+                  <th>Messages</th>
+                  <th>Watchlist</th>
+                  <th>Last active</th>
+                </tr>
+
+              </thead>
+
+
+              <tbody>
+              </tbody>
+
+            </table>
+
+          </div>
+
+        </div>
+
+      </section>
+
+
+
+      <!-- ====================================================
+           WATCHLISTS & ALERTS
+      ===================================================== -->
+      <section
+        class="view"
+        id="view-watchlists"
+      >
+
+        <div class="view-header">
+
+          <h2>
+            Watchlists &amp; Alerts
+          </h2>
+
+          <p class="view-sub">
+            What Atlas is proactively keeping
+            an eye on right now.
+          </p>
+
+        </div>
+
+
+        <div class="grid-2">
+
+
+          <!-- Popular symbols -->
+          <div class="card">
+
+            <div class="card-head">
+
+              <h3>
+                Symbol popularity
+              </h3>
+
+            </div>
+
+
+            <div
+              id="symbol-bars"
+              class="bar-list"
+            >
+            </div>
+
+          </div>
+
+
+          <!-- Alerts explanation -->
+          <div class="card">
+
+            <div class="card-head">
+
+              <h3>
+                How alerts work
+              </h3>
+
+            </div>
+
+
+            <p class="explain-text">
+
+              Atlas polls each tracked symbol on a schedule.
+
+              When a stock moves more than its threshold
+              (default <strong>±5%</strong>)
+              in a session, the user gets a push —
+
+              no polling, no refreshing,
+              no missed moves.
+
+            </p>
+
+
+            <div
+              class="mini-stat-row"
+              id="alert-mini-stats"
+            >
+            </div>
+
+          </div>
+
+        </div>
+
+      </section>
+
+
+
+      <!-- ====================================================
+           BRIEFINGS
+      ===================================================== -->
+      <section
+        class="view"
+        id="view-briefings"
+      >
+
+        <div class="view-header">
+
+          <h2>
+            Briefings sent
+          </h2>
+
+          <p class="view-sub">
+            Atlas stays quiet unless there's something
+            worth saying. Here's what it's actually pushed.
+          </p>
+
+        </div>
+
+
+        <div class="card">
+
+          <div
+            class="feed feed-tall"
+            id="feed-briefings"
+          >
+          </div>
+
+        </div>
+
+      </section>
+
+
+    </main>
+
+  </div>
+
+
+  <!-- ======================================================
+       IMPORTANT:
+       Chart.js MUST load before app.js
+  ======================================================= -->
+
+  <script
+    src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"
+  ></script>
+
+  <script src="/app.js"></script>
+
+</body>
+</html>
