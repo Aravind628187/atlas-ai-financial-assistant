@@ -13,7 +13,7 @@ import datetime as dt
 import enum
 
 from sqlalchemy import (
-    String, Integer, Float, Boolean, Text, DateTime, ForeignKey, Enum, JSON, UniqueConstraint
+    String, Integer, BigInteger, Float, Boolean, Text, DateTime, ForeignKey, Enum, JSON, UniqueConstraint
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -37,7 +37,7 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    telegram_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     username: Mapped[str | None] = mapped_column(String(128), nullable=True)
     first_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
 

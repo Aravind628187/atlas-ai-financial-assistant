@@ -40,8 +40,13 @@ def _dashboard_port_is_busy() -> bool:
 
 async def run() -> None:
     setup_logging()
+    if settings.telegram_mode != "polling":
+        logger.error(
+            "TELEGRAM_MODE=%s does not use the polling launcher; run scripts/run_production.py",
+            settings.telegram_mode,
+        )
+        return
     init_db()
-
     if not settings.gemini_api_key:
         logger.warning("⚠️  GEMINI_API_KEY is empty — set it in .env before chatting with the bot.")
     if not settings.telegram_bot_token:

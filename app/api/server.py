@@ -7,6 +7,7 @@ It does not communicate directly with Telegram or Gemini.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import hashlib
 import hmac
@@ -24,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import func, select, text
+from telegram import Update
 
 from app.config import settings
 
@@ -185,12 +187,13 @@ def is_admin_authenticated(request: Request) -> bool:
 # FastAPI application
 # ============================================================
 
-def create_dashboard_app() -> FastAPI:
+def create_dashboard_app(telegram_application=None) -> FastAPI:
     init_db()
 
     app = FastAPI(
         title="Atlas AI Dashboard API"
     )
+    app.state.telegram_application = telegram_application
 
     app.add_middleware(
         CORSMiddleware,
@@ -274,6 +277,42 @@ def create_dashboard_app() -> FastAPI:
         response = JSONResponse({"status": "ok"})
         response.delete_cookie(SESSION_COOKIE, path="/")
         return response
+
+    @app.post("/telegram/webhook")
+    async def telegram_webhook(request: Request):
+        """Authenticate and dispatch one Telegram update to the existing handlers."""
+        if settings.telegram_mode != "webhook":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        expected_secret = settings.telegram_webhook_secret
+        supplied_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+        if not expected_secret:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Telegram webhook is not fully configured",
+            )
+        if not supplied_secret or not hmac.compare_digest(supplied_secret, expected_secret):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid webhook secret")
+        application = request.app.state.telegram_application
+        if application is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Telegram webhook runtime is unavailable",
+            )
+        try:
+            payload = await request.json()
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Telegram update") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Telegram update")
+        update = Update.de_json(payload, application.bot)
+        try:
+            application.update_queue.put_nowait(update)
+        except asyncio.QueueFull as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Telegram update queue is temporarily unavailable",
+            ) from exc
+        return {"status": "ok"}
 
     # ========================================================
     # Public product data — deliberately excludes all user data
@@ -747,6 +786,7 @@ def create_dashboard_app() -> FastAPI:
             "service": "atlas-ai",
             "database": database_status,
             "telegram": "configured" if settings.telegram_bot_token else "not_configured",
+            "telegram_mode": settings.telegram_mode,
             "gemini": "configured" if settings.gemini_api_key else "not_configured",
             "market_provider": getattr(gateway.primary, "name", "not_configured"),
             "scheduler": "running" if runtime_state.scheduler_running else "not_running",

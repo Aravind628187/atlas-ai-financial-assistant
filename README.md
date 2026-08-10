@@ -129,6 +129,64 @@ Public frontend: `http://127.0.0.1:8000/`
 
 Admin login: `http://127.0.0.1:8000/login`
 
+## Free production deployment: Render + Neon
+
+Production uses the same application, handlers, models, frontend, dashboard, and scheduler. The deployment entry point changes Telegram transport from polling to a webhook and selects PostgreSQL entirely through environment configuration.
+
+Create a Neon Free Tier project and copy its pooled connection string. Set it on Render as `DATABASE_URL` in this form:
+
+```dotenv
+DATABASE_URL=postgresql://USER:PASSWORD@ENDPOINT-pooler.REGION.aws.neon.tech/DATABASE?sslmode=require
+```
+
+Do not commit the connection string. Atlas uses `psycopg2-binary`, enables connection pre-ping for PostgreSQL, and calls SQLAlchemy `create_all` at startup. This creates missing tables but does not drop or reset existing tables. Future schema changes should use migrations rather than destructive table recreation.
+
+Create the service from `render.yaml`, or enter these settings in Render:
+
+```text
+Runtime: Python
+Plan: Free
+Build command: pip install -r requirements.txt
+Start command: python scripts/run_production.py
+Health check: /api/health
+```
+
+Required Render environment variables:
+
+```dotenv
+TELEGRAM_MODE=webhook
+TELEGRAM_BOT_TOKEN=<BotFather token>
+TELEGRAM_BOT_USERNAME=<public bot username without @>
+TELEGRAM_WEBHOOK_SECRET=<random URL-safe secret, 1-256 characters>
+PUBLIC_BASE_URL=https://YOUR-SERVICE.onrender.com
+DATABASE_URL=<Neon pooled PostgreSQL connection string>
+GEMINI_API_KEY=<Gemini key>
+ADMIN_EMAIL=<admin email>
+ADMIN_PASSWORD=<strong admin password>
+SECRET_KEY=<long random session-signing secret>
+```
+
+Add any financial provider keys used by the existing router (`FINNHUB_API_KEY`, `FMP_API_KEY`, `TWELVE_DATA_API_KEY`, `ALPHA_VANTAGE_API_KEY`, `NEWS_API_KEY`, and `MASSIVE_API_KEY`) in the Render dashboard. Never put their values in `render.yaml`.
+
+On startup, Atlas registers:
+
+```text
+https://YOUR-SERVICE.onrender.com/telegram/webhook
+```
+
+Telegram requests must include the secret-token header registered by Atlas. Invalid or missing secrets receive HTTP 403. `scripts/run_production.py` never starts polling and runs one Telegram application, one scheduler, and one FastAPI server in a single asyncio process. Render supplies `PORT`; Atlas binds to `0.0.0.0` and that port.
+
+Local development remains unchanged:
+
+```dotenv
+TELEGRAM_MODE=polling
+DATABASE_URL=sqlite:///data/atlas.db
+```
+
+Run it with `python3 scripts/run_bot.py`. This continues to use Telegram polling, the existing local SQLite file, the scheduler, FastAPI, and all current handlers.
+
+Render Free services can sleep after inactivity. While asleep, scheduled alerts and briefings cannot run and therefore are not guaranteed at their configured time. An incoming Telegram webhook request wakes the web service, but the first request can be delayed by the cold start. Render also uses an ephemeral filesystem, so production user data must remain in Neon rather than a SQLite file on Render.
+
 ## Tests
 
 The critical reliability suite uses in-memory SQLite and mocked providers; it does not require live market access:

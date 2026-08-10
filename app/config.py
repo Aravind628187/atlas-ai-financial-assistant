@@ -6,6 +6,10 @@ All runtime settings are loaded from environment variables (via a local
 """
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,6 +19,9 @@ class Settings(BaseSettings):
     # --- Telegram -----------------------------------------------------
     telegram_bot_token: str = ""
     telegram_bot_username: str = "ATLASAI2026BOT"
+    telegram_mode: Literal["polling", "webhook"] = "polling"
+    public_base_url: str = ""
+    telegram_webhook_secret: str = ""
 
     # --- Gemini ---------------------------------------------------------
     gemini_api_key: str = ""
@@ -22,7 +29,7 @@ class Settings(BaseSettings):
     gemini_cooldown_seconds: int = 300
 
     # --- Database ---------------------------------------------------------
-    database_url: str = "sqlite:///./data/atlas.db"
+    database_url: str = "sqlite:///data/atlas.db"
 
     # --- Optional data sources ---------------------------------------------
     news_api_key: str = ""
@@ -72,6 +79,24 @@ class Settings(BaseSettings):
     @property
     def google_oauth_enabled(self) -> bool:
         return bool(self.google_oauth_client_id and self.google_oauth_client_secret)
+
+    @property
+    def telegram_webhook_url(self) -> str | None:
+        base_url = self.public_base_url.strip().rstrip("/")
+        return f"{base_url}/telegram/webhook" if base_url else None
+
+
+def runtime_port(environ: Mapping[str, str] | None = None) -> int:
+    """Use Render's PORT when present, retaining the configured local port otherwise."""
+    source = os.environ if environ is None else environ
+    raw_value = source.get("PORT", str(settings.dashboard_port))
+    try:
+        port = int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("PORT must be an integer") from exc
+    if not 1 <= port <= 65535:
+        raise ValueError("PORT must be between 1 and 65535")
+    return port
 
 
 settings = Settings()
