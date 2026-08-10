@@ -45,8 +45,8 @@ class Settings(BaseSettings):
     market_data_api_key: str = ""
     secondary_market_data_provider: str = ""
     secondary_market_data_api_key: str = ""
-    quote_cache_ttl_seconds: int = 30
-    news_cache_ttl_seconds: int = 300
+    quote_cache_ttl_seconds: int = 90
+    news_cache_ttl_seconds: int = 900
     fundamentals_cache_ttl_seconds: int = 21600
     verified_quote_cache_seconds: int = 86400
     verified_reference_cache_seconds: int = 2592000
@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     pe_verification_tolerance_pct: float = 15.0
     market_cap_verification_tolerance_pct: float = 5.0
     sec_user_agent: str = "AtlasAI/1.0 admin@example.com"
-    sec_cache_ttl_seconds: int = 900
+    sec_cache_ttl_seconds: int = 1800
     max_watchlist_items: int = 25
 
     # --- Optional Google OAuth (Gmail / Calendar / Drive / Sheets) ---------

@@ -8,7 +8,7 @@ import time
 import uuid
 from dataclasses import replace
 from app.config import settings
-from app.services.data_freshness import Freshness, market_session_status, quote_freshness
+from app.services.data_freshness import Freshness, MarketSession, market_session_status, quote_freshness
 from app.services.providers.base import DataStatus, EarningsData, FinancialDataResult, QuoteData
 from app.services.providers.finnhub_provider import FinnhubProvider
 from app.services.providers.yfinance_provider import YFinanceProvider
@@ -30,10 +30,13 @@ class TTLCache:
         with self._lock:
             entry = self._entries.get(key)
             if not entry:
+                reliability_telemetry.increment("cache_misses")
                 return None
             expires, _, value = entry
             if time.monotonic() >= expires:
+                reliability_telemetry.increment("cache_misses")
                 return None
+            reliability_telemetry.increment("cache_hits")
             return replace(value, cache_hit=True)
 
     def get_last_verified(self, key: str, max_age_seconds: int) -> FinancialDataResult | None:
@@ -53,6 +56,7 @@ class TTLCache:
                 return None
             if isinstance(value.data, EarningsData) and value.data.status == "unverified":
                 return None
+            reliability_telemetry.increment("cache_hits")
             verification = {
                 **(value.verification or {}),
                 "cached_verified": True,
@@ -208,7 +212,10 @@ class FinancialDataGateway:
         key = f"{operation}:{clean}:{args}:verify={verify}"
         # Coalesce concurrent identical requests. The second caller rechecks
         # the cache after the first completes instead of spending more quota.
-        with self._request_lock(key):
+        request_lock = self._request_lock(key)
+        if request_lock.locked():
+            reliability_telemetry.increment("requests_coalesced")
+        with request_lock:
             return self._routed_fetch_locked(intent, operation, clean, key, ttl, *args, verify=verify)
 
     def _routed_fetch_locked(self, intent: str, operation: str, clean: str, key: str,
@@ -234,8 +241,9 @@ class FinancialDataGateway:
         return result
 
     def get_quote(self, symbol: str, verify: bool = True) -> FinancialDataResult:
-        result = self._routed_fetch("quote", "get_quote", symbol, settings.quote_cache_ttl_seconds,
-                                    verify=verify and settings.financial_provider_verify_critical) if self.router else self._cached_fetch("get_quote", symbol, settings.quote_cache_ttl_seconds)
+        ttl = self.quote_cache_ttl_seconds()
+        result = self._routed_fetch("quote", "get_quote", symbol, ttl,
+                                    verify=verify and settings.financial_provider_verify_critical) if self.router else self._cached_fetch("get_quote", symbol, ttl)
         if result.status == DataStatus.UNAVAILABLE:
             return result
         freshness = quote_freshness(
@@ -274,18 +282,31 @@ class FinancialDataGateway:
                     self.rejected_disagreements += 1
         return result
 
+    @staticmethod
+    def quote_cache_ttl_seconds() -> int:
+        session = market_session_status()
+        minimum = {
+            MarketSession.OPEN: 90,
+            MarketSession.PRE_MARKET: 240,
+            MarketSession.AFTER_HOURS: 240,
+            MarketSession.CLOSED: 1200,
+        }[session]
+        return max(settings.quote_cache_ttl_seconds, minimum)
+
     def get_profile(self, symbol: str) -> FinancialDataResult:
-        return self._routed_fetch("profile", "get_profile", symbol, settings.fundamentals_cache_ttl_seconds) if self.router else self._cached_fetch("get_profile", symbol, settings.fundamentals_cache_ttl_seconds)
+        ttl = max(settings.fundamentals_cache_ttl_seconds, 86400)
+        return self._routed_fetch("profile", "get_profile", symbol, ttl) if self.router else self._cached_fetch("get_profile", symbol, ttl)
 
     def get_fundamentals(self, symbol: str) -> FinancialDataResult:
         return self._routed_fetch("fundamentals", "get_fundamentals", symbol, settings.fundamentals_cache_ttl_seconds,
                                   verify=settings.financial_provider_verify_critical) if self.router else self._cached_fetch("get_fundamentals", symbol, settings.fundamentals_cache_ttl_seconds)
 
     def get_news(self, symbol: str, limit: int = 5) -> FinancialDataResult:
-        return self._routed_fetch("news", "get_news", symbol, settings.news_cache_ttl_seconds, limit) if self.router else self._cached_fetch("get_news", symbol, settings.news_cache_ttl_seconds, limit)
+        ttl = max(settings.news_cache_ttl_seconds, 600)
+        return self._routed_fetch("news", "get_news", symbol, ttl, limit) if self.router else self._cached_fetch("get_news", symbol, ttl, limit)
 
     def get_market_news(self, limit: int = 6) -> FinancialDataResult:
-        return self._routed_fetch("market_news", "get_market_news", "MARKET", settings.news_cache_ttl_seconds, limit) if self.router else self._unavailable("MARKET", "market_news")
+        return self._routed_fetch("market_news", "get_market_news", "MARKET", max(settings.news_cache_ttl_seconds, 600), limit) if self.router else self._unavailable("MARKET", "market_news")
 
     def get_earnings(self, symbol: str) -> FinancialDataResult:
         return self._routed_fetch("earnings", "get_earnings", symbol, settings.fundamentals_cache_ttl_seconds) if self.router else self._cached_fetch("get_earnings", symbol, settings.fundamentals_cache_ttl_seconds)
@@ -302,7 +323,7 @@ class FinancialDataGateway:
         last_verified = self.cache.get_last_verified(key, settings.verified_reference_cache_seconds)
         result = self._call(self.sec, "get_filings", clean, forms, limit)
         if result.status != DataStatus.UNAVAILABLE and result.data is not None:
-            self.cache.set(key, result, settings.sec_cache_ttl_seconds)
+            self.cache.set(key, result, max(settings.sec_cache_ttl_seconds, 1800))
             self.sec_last_success = result.retrieved_at
         else:
             self.sec_last_failure = dt.datetime.now(UTC)

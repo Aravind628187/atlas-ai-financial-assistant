@@ -49,6 +49,7 @@ class ProviderHealth:
     latency_ms: float | None = None
     failure_reason: str | None = None
     circuit_until: float = 0.0
+    cooldown_until: dt.datetime | None = None
 
 
 def _configured(provider) -> bool:
@@ -105,6 +106,8 @@ class FinancialDataRouter:
 
     def _ordered(self, intent: str) -> list[tuple[str, Any]]:
         names = list(self.ROUTES[intent])
+        if intent == "news" and settings.telegram_mode == "webhook":
+            names = ["finnhub", "rss", "yfinance", "newsapi"]
         result = []
         for name in names:
             provider = self.providers.get(name)
@@ -112,6 +115,7 @@ class FinancialDataRouter:
             if not provider or not health or not health.configured:
                 continue
             if health.circuit_until > time.monotonic():
+                reliability_telemetry.increment("circuit_breaker_skips")
                 continue
             result.append((name, provider))
         return result
@@ -135,7 +139,7 @@ class FinancialDataRouter:
             state = self.health_state[name]
             state.status, state.consecutive_failures = "ok", 0
             state.last_success_at, state.latency_ms = dt.datetime.now(UTC), round(latency, 2)
-            state.failure_reason, state.circuit_until = None, 0
+            state.failure_reason, state.circuit_until, state.cooldown_until = None, 0, None
 
     def _record_failure(self, name: str, latency: float, reason: str):
         with self._lock:
@@ -146,12 +150,16 @@ class FinancialDataRouter:
             if state.consecutive_failures >= FAILURE_THRESHOLD or reason in {"invalid_credentials", "rate_limited", "not_entitled"}:
                 if reason == "invalid_credentials":
                     state.circuit_until = float("inf")
+                    state.cooldown_until = None
                 elif reason == "rate_limited":
                     state.circuit_until = time.monotonic() + QUOTA_CIRCUIT_SECONDS
+                    state.cooldown_until = dt.datetime.now(UTC) + dt.timedelta(seconds=QUOTA_CIRCUIT_SECONDS)
                 elif reason == "not_entitled":
                     state.circuit_until = time.monotonic() + ENTITLEMENT_CIRCUIT_SECONDS
+                    state.cooldown_until = dt.datetime.now(UTC) + dt.timedelta(seconds=ENTITLEMENT_CIRCUIT_SECONDS)
                 else:
                     state.circuit_until = time.monotonic() + TRANSIENT_CIRCUIT_SECONDS
+                    state.cooldown_until = dt.datetime.now(UTC) + dt.timedelta(seconds=TRANSIENT_CIRCUIT_SECONDS)
                 state.status = reason if reason in {"invalid_credentials", "rate_limited", "not_entitled"} else "error"
 
     def _call(self, name: str, provider: Any, intent: str, symbol: str, *args) -> FinancialDataResult:
@@ -160,6 +168,7 @@ class FinancialDataRouter:
         last_error: Exception | None = None
         for attempt in range(max(1, settings.financial_provider_max_retries)):
             try:
+                reliability_telemetry.record_upstream_call(name)
                 result = getattr(provider, method)(symbol, *args) if intent != "market_news" else getattr(provider, method)(*args)
                 latency = (time.monotonic() - started) * 1000
                 if result.status not in {DataStatus.UNAVAILABLE, DataStatus.ERROR, DataStatus.NOT_CONFIGURED,
@@ -183,6 +192,8 @@ class FinancialDataRouter:
         latency = (time.monotonic() - started) * 1000
         message = str(last_error or "unavailable")
         reason = message if message in {"rate_limited", "invalid_credentials", "not_entitled"} else self._reason(last_error or RuntimeError("unavailable"))
+        if reason == "rate_limited":
+            reliability_telemetry.increment("provider_429_count")
         self._record_failure(name, latency, reason)
         status = {"rate_limited": DataStatus.RATE_LIMITED, "invalid_credentials": DataStatus.INVALID_CREDENTIALS,
                   "not_entitled": DataStatus.NOT_ENTITLED}.get(reason, DataStatus.UNAVAILABLE)
@@ -405,15 +416,21 @@ class FinancialDataRouter:
 
     def health(self) -> dict:
         providers = {}
+        now = time.monotonic()
         for name, state in self.health_state.items():
+            cooldown_active = state.circuit_until > now and state.failure_reason != "invalid_credentials"
             providers[name] = {
                 "provider": name, "configured": state.configured, "status": state.status,
+                "last_status": state.status,
                 "last_success_at": state.last_success_at.isoformat() if state.last_success_at else None,
                 "last_failure_at": state.last_failure_at.isoformat() if state.last_failure_at else None,
                 "last_success": state.last_success_at.isoformat() if state.last_success_at else None,
                 "last_failure": state.last_failure_at.isoformat() if state.last_failure_at else None,
                 "latency_ms": state.latency_ms, "failure_reason": state.failure_reason,
                 "failure_category": state.failure_reason,
+                "last_error_category": state.failure_reason,
+                "cooldown_active": cooldown_active,
+                "cooldown_until": state.cooldown_until.isoformat() if state.cooldown_until else None,
             }
         configured = [p for p in providers.values() if p["configured"]]
         overall = "ok" if any(p["status"] == "ok" for p in configured) else "degraded"
