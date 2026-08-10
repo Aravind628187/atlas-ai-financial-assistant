@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.ai import onboarding
 from app.ai.gemini_client import gemini
-from app.ai.gemini_client import GeminiUnavailableError
 from app.ai.financial_response_validator import validate_financial_response
 from app.ai.intent_router import RoutedIntent, route
 from app.ai.memory import extract_and_store_personalization, get_preferences, get_recent_history, log_message, upsert_preference
@@ -757,8 +756,6 @@ def handle_text_turn(db: Session, user: User, text: str, input_kind: str = "text
     if user.onboarding_stage != OnboardingStage.DONE.value:
         try:
             reply = onboarding.handle_onboarding_turn(db, user, text)
-        except GeminiUnavailableError:
-            reply = "The AI synthesis service is temporarily rate-limited. Deterministic quotes, alerts, watchlists, and calculations still work."
         except Exception:
             logger.exception("Onboarding failed for user=%s", user.id)
             reply = "I couldn't process that setup answer right now. Please try again."

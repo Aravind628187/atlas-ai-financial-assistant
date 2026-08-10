@@ -59,7 +59,9 @@ async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 def _resume_prompt(stage: str) -> str:
     prompts = {
         OnboardingStage.ASKED_ROLE.value: "what best describes you — investor, analyst, founder, or something else?",
-        OnboardingStage.ASKED_INTERESTS.value: "which companies or sectors should I track for you?",
+        OnboardingStage.ASKED_INTERESTS.value: "which companies, sectors, or markets do you follow?",
+        OnboardingStage.ASKED_MONITORING.value: "is there anything you'd like me to monitor?",
+        OnboardingStage.ASKED_INTELLIGENCE.value: "which intelligence matters most — market news, earnings, SEC filings, or company research?",
         OnboardingStage.ASKED_BRIEFING_TIME.value: "what time do you want your daily briefing?",
         OnboardingStage.ASKED_INTEGRATIONS.value: "want to connect Gmail or Calendar, or skip for now?",
     }

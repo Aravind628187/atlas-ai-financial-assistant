@@ -28,6 +28,8 @@ class OnboardingStage(str, enum.Enum):
     NEW = "new"
     ASKED_ROLE = "asked_role"
     ASKED_INTERESTS = "asked_interests"
+    ASKED_MONITORING = "asked_monitoring"
+    ASKED_INTELLIGENCE = "asked_intelligence"
     ASKED_BRIEFING_TIME = "asked_briefing_time"
     ASKED_INTEGRATIONS = "asked_integrations"
     DONE = "done"
