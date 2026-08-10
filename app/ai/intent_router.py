@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass, field
 
 from app.ai.gemini_client import gemini
+from app.ai.llm_gateway import llm_gateway
 from app.ai.prompts import INTENT_ROUTER_SYSTEM
 from app.services.entity_resolution import resolve_entities
 
@@ -115,7 +116,7 @@ def route(user_message: str) -> RoutedIntent:
             needs_clarification=deterministic == "clarify", clarifying_question=clarification,
         )
     try:
-        data = gemini.generate_json(user_message, system_instruction=INTENT_ROUTER_SYSTEM)
+        data = llm_gateway.generate_json(user_message, system_instruction=INTENT_ROUTER_SYSTEM)
     except Exception:
         return RoutedIntent(intent="unsupported_or_uncertain", symbols=entities.symbols)
     if not isinstance(data, dict):

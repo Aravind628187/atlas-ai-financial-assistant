@@ -33,9 +33,11 @@ def build_morning_brief(user: User, watchlist: list[WatchlistItem], preferences:
     for symbol in symbols:
         result = gateway.get_quote(symbol, verify=False)
         quote = result.data
-        if isinstance(quote, QuoteData) and result.status not in {DataStatus.UNAVAILABLE, DataStatus.STALE}:
+        cached_verified = bool((result.verification or {}).get("cached_verified"))
+        if isinstance(quote, QuoteData) and result.status != DataStatus.UNAVAILABLE and (result.status != DataStatus.STALE or cached_verified):
             move = f", {quote.change_pct:+.2f}%" if quote.change_pct is not None else ""
-            line = f"• {symbol}: {quote.price:,.2f} {quote.currency or ''}{move}".rstrip()
+            cache_label = " (last verified cache)" if cached_verified else ""
+            line = f"• {symbol}: {quote.price:,.2f} {quote.currency or ''}{move}{cache_label}".rstrip()
             quote_rows.append((abs(quote.change_pct or 0), symbol, line, quote.change_pct))
             if quote.change_pct is not None:
                 observations.append((abs(quote.change_pct), f"• {symbol}'s latest verified session move was {quote.change_pct:+.2f}%."))

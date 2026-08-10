@@ -3,6 +3,19 @@
 
   const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const byId = (id) => document.getElementById(id);
+  let publicStorage = null;
+  try { publicStorage = window.localStorage; } catch (_error) { publicStorage = null; }
+  const resilienceClient = window.AtlasResilience
+    ? window.AtlasResilience.createClient({ storage: publicStorage })
+    : null;
+  const sectionState = new Map();
+  const slowRetryTimers = new Map();
+  const refreshIntervals = {
+    market: 60000,
+    companies: 120000,
+    providers: 180000,
+    system: 300000,
+  };
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -11,23 +24,6 @@
       .replaceAll(">", "&gt;")
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#039;");
-  }
-
-  async function fetchJson(url, timeoutMs = 9000) {
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const response = await fetch(url, {
-        headers: { Accept: "application/json" },
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error("Request unavailable");
-      const payload = await response.json();
-      if (!payload || typeof payload !== "object") throw new Error("Invalid response");
-      return payload;
-    } finally {
-      window.clearTimeout(timer);
-    }
   }
 
   function finiteNumber(value) {
@@ -85,11 +81,14 @@
     return labels[String(status || "").toLowerCase()] || labels.unknown;
   }
 
-  function freshnessLabel(quote, marketStatus) {
+  function freshnessLabel(quote, marketStatus, cached = false) {
     if (!quote.available) return "Data unavailable";
+    if (cached) return "Last verified";
     const freshness = String(quote.freshness || "").toLowerCase();
-    if (freshness === "delayed") return "Delayed quote";
-    if (freshness === "stale") return "Latest available quote";
+    if (["live", "current", "real_time"].includes(freshness)) return "Live / current";
+    if (freshness === "delayed") return "Latest available";
+    if (freshness === "last_verified") return "Last verified";
+    if (freshness === "stale") return "Stale";
     if (String(marketStatus).toLowerCase() === "open") return "Currently trading";
     if (String(marketStatus).toLowerCase() === "closed") return "Latest close";
     return "Latest available quote";
@@ -106,6 +105,21 @@
       minute: "2-digit",
       timeZoneName: "short",
     }).format(date)}`;
+  }
+
+  function formatDataTimestamp(value, prefix = "Latest verified session") {
+    if (!value) return `${prefix}: unavailable`;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return `${prefix}: unavailable`;
+    return `${prefix}: ${new Intl.DateTimeFormat("en-US", {
+      month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
+    }).format(date)}`;
+  }
+
+  function pageRefreshLabel() {
+    return `Page refreshed: ${new Intl.DateTimeFormat("en-US", {
+      hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short",
+    }).format(new Date())}`;
   }
 
   function setTelegram(summary) {
@@ -156,12 +170,13 @@
       </article>`;
   }
 
-  function renderMarket(payload) {
+  function renderMarket(payload, context = {}) {
     const grid = byId("market-grid");
     const tape = byId("market-tape-track");
     const quotes = Array.isArray(payload.quotes) ? payload.quotes : [];
     const status = String(payload.market_status || "unknown").toLowerCase();
     const label = marketLabel(status);
+    const hasLastVerified = context.cached || quotes.some((quote) => String(quote.freshness).toLowerCase() === "last_verified");
 
     ["hero-market-status", "tape-status"].forEach((id) => {
       if (byId(id)) byId(id).textContent = label;
@@ -184,10 +199,11 @@
             return unavailableCard(quote.symbol, quote.name);
           }
           const move = movePresentation(quote.change_pct);
+          const cachedQuote = context.cached || String(quote.freshness).toLowerCase() === "last_verified";
           return `
             <article class="market-card">
               <div class="market-card-head"><strong>${escapeHtml(quote.symbol)}</strong><span>${escapeHtml(quote.name || quote.symbol)}</span></div>
-              <div class="freshness-badge">${escapeHtml(freshnessLabel(quote, status))}</div>
+              <div class="freshness-badge">${escapeHtml(freshnessLabel(quote, status, cachedQuote))}</div>
               <p class="market-price">${escapeHtml(formatPrice(quote.price, quote.currency))}</p>
               <span class="market-move ${move.tone}">${escapeHtml(move.text)}</span>
               <div class="market-source"><span>${escapeHtml(sourceName(quote.source))}</span>${quote.verified_with ? `<span>Cross-checked · ${escapeHtml(sourceName(quote.verified_with))}</span>` : ""}</div>
@@ -205,18 +221,29 @@
           }).join("")
         : '<span class="ticker-item">Reliable market data is temporarily unavailable.</span>';
     }
-    if (byId("market-note")) byId("market-note").textContent = formatTimestamp(payload.generated_at);
+    const dataTimes = quotes.map((quote) => quote.data_as_of).filter(Boolean).sort();
+    const latestDataTime = dataTimes.length ? dataTimes[dataTimes.length - 1] : null;
+    if (byId("market-note")) {
+      byId("market-note").textContent = hasLastVerified
+        ? `${formatDataTimestamp(latestDataTime)} · Current refresh temporarily unavailable. ${pageRefreshLabel()}`
+        : `${formatDataTimestamp(latestDataTime)} · ${pageRefreshLabel()}`;
+    }
   }
 
-  function renderCompanies(payload) {
+  function renderCompanies(payload, context = {}) {
     const grid = byId("companies-grid");
     const companies = Array.isArray(payload.companies) ? payload.companies : [];
     const live = Boolean(payload.is_live_ranking);
     if (byId("ranking-source")) {
-      byId("ranking-source").innerHTML = `<span></span>${live ? "Live ranking · FMP" : "Reference ranking · not live"}`;
+      const cachePrefix = context.cached ? "Last verified · " : "";
+      byId("ranking-source").innerHTML = `<span></span>${cachePrefix}${live ? "Live ranking · FMP" : "Reference ranking · not live"}`;
       byId("ranking-source").className = `ranking-source ${live ? "is-live" : "is-reference"}`;
     }
-    if (byId("ranking-time")) byId("ranking-time").textContent = formatTimestamp(payload.retrieved_at);
+    if (byId("ranking-time")) {
+      byId("ranking-time").textContent = context.cached
+        ? `${formatDataTimestamp(payload.retrieved_at, "Last verified ranking")} · Current refresh temporarily unavailable.`
+        : `${formatDataTimestamp(payload.retrieved_at, "Ranking retrieved")} · ${pageRefreshLabel()}`;
+    }
     if (!grid) return;
     grid.setAttribute("aria-busy", "false");
     if (!companies.length) {
@@ -225,6 +252,7 @@
     }
     grid.innerHTML = companies.map((company) => {
       const hasQuote = company.quote_available && finiteNumber(company.price) !== null;
+      const lastVerifiedQuote = context.cached || String(company.quote_freshness).toLowerCase() === "last_verified";
       const move = movePresentation(company.change_pct);
       return `
         <article class="company-card">
@@ -234,13 +262,13 @@
             <span>${escapeHtml(company.name || company.symbol)}</span>
           </div>
           <div class="company-value">
-            ${hasQuote ? `<b>${escapeHtml(formatPrice(company.price, company.currency))}</b><span class="${move.tone}">${escapeHtml(move.text)}</span>` : '<span class="quote-unavailable">Latest quote unavailable</span>'}
+            ${hasQuote ? `<b>${escapeHtml(formatPrice(company.price, company.currency))}</b><span class="${move.tone}">${escapeHtml(move.text)}</span>${lastVerifiedQuote ? '<span class="quote-unavailable">Last verified</span>' : ""}` : '<span class="quote-unavailable">Price temporarily unavailable</span>'}
           </div>
         </article>`;
     }).join("");
   }
 
-  function renderProviders(payload) {
+  function renderProviders(payload, context = {}) {
     const list = byId("provider-list");
     const providers = Array.isArray(payload.providers) ? payload.providers : [];
     if (!list) return;
@@ -259,6 +287,9 @@
           <span class="provider-status ${escapeHtml(statusClass)}">${escapeHtml(state)}</span>
         </div>`;
     }).join("");
+    if (byId("provider-refresh-status")) {
+      byId("provider-refresh-status").textContent = context.cached ? "Showing last verified status" : "Updated just now";
+    }
   }
 
   function showSectionError(id, message) {
@@ -268,25 +299,134 @@
     element.innerHTML = `<p class="data-error">${escapeHtml(message)}</p>`;
   }
 
-  async function loadPublicData() {
-    const tasks = [
-      ["system", "/api/public/system-summary", renderSystem],
-      ["market", "/api/public/market-overview", renderMarket],
-      ["companies", "/api/public/top-companies?limit=15", renderCompanies, 15000],
-      ["providers", "/api/public/provider-summary", renderProviders],
-    ];
-    const results = await Promise.allSettled(tasks.map(([, url, , timeout]) => fetchJson(url, timeout)));
-    results.forEach((result, index) => {
-      const [name, , renderer] = tasks[index];
-      if (result.status === "fulfilled") {
-        renderer(result.value);
-        return;
+  const publicSections = {
+    system: { url: "/api/public/system-summary", renderer: renderSystem, timeoutMs: 15000 },
+    market: { url: "/api/public/market-overview", renderer: renderMarket, timeoutMs: 15000 },
+    companies: { url: "/api/public/top-companies?limit=15", renderer: renderCompanies, timeoutMs: 15000 },
+    providers: { url: "/api/public/provider-summary", renderer: renderProviders, timeoutMs: 15000 },
+  };
+
+  function setSectionProgress(name, phase) {
+    const messages = {
+      connecting: "Connecting to Atlas data network...",
+      waking: "Atlas is waking up and reconnecting to its data network...",
+      retrying: "Retrying verified market data...",
+    };
+    const message = messages[phase] || messages.connecting;
+    if (name === "market" && byId("market-note")) byId("market-note").textContent = message;
+    if (name === "companies" && byId("ranking-time")) byId("ranking-time").textContent = message;
+    if (name === "providers" && byId("provider-refresh-status")) byId("provider-refresh-status").textContent = message;
+  }
+
+  function renderCachedState(name) {
+    if (!resilienceClient) return false;
+    const cached = resilienceClient.getCachedPayload(name);
+    if (!cached) return false;
+    publicSections[name].renderer(cached.payload, { cached: true, cache: cached });
+    if (name === "market" && byId("data-refresh-status")) byId("data-refresh-status").textContent = "Showing last verified data";
+    return true;
+  }
+
+  function scheduleSlowRetry(name) {
+    if (slowRetryTimers.has(name)) return;
+    const timer = window.setTimeout(() => {
+      slowRetryTimers.delete(name);
+      if (document.hidden || !navigator.onLine) return;
+      refreshSection(name);
+    }, 60000);
+    slowRetryTimers.set(name, timer);
+  }
+
+  function showFinalSectionFailure(name) {
+    if (name === "market") {
+      showSectionError("market-grid", "Market data is temporarily unavailable. Atlas will retry automatically.");
+      if (byId("data-refresh-status")) byId("data-refresh-status").textContent = "Retrying automatically";
+    }
+    if (name === "companies") showSectionError("companies-grid", "Ranking temporarily unavailable. Retrying automatically...");
+    if (name === "providers") showSectionError("provider-list", "Provider status is temporarily unavailable. Retrying automatically...");
+    if (name === "system") setTelegram({});
+  }
+
+  async function refreshSection(name, options = {}) {
+    const section = publicSections[name];
+    if (!section || !resilienceClient) return false;
+    if (!navigator.onLine) {
+      renderCachedState(name);
+      return false;
+    }
+    if (options.initial) setSectionProgress(name, "connecting");
+    if (name === "market" && !options.initial && byId("data-refresh-status")) {
+      byId("data-refresh-status").textContent = "Refreshing...";
+    }
+    try {
+      const payload = await resilienceClient.fetchWithRetry(section.url, {
+        timeoutMs: section.timeoutMs,
+        onRetry: ({ attempt }) => setSectionProgress(name, attempt === 2 ? "waking" : "retrying"),
+      });
+      resilienceClient.cachePayload(name, payload);
+      section.renderer(payload, { cached: false });
+      sectionState.set(name, { lastSuccess: Date.now() });
+      if (name === "market" && byId("data-refresh-status")) byId("data-refresh-status").textContent = "Updated just now";
+      if (slowRetryTimers.has(name)) {
+        window.clearTimeout(slowRetryTimers.get(name));
+        slowRetryTimers.delete(name);
       }
-      if (name === "market") showSectionError("market-grid", "Market data is temporarily unavailable.");
-      if (name === "companies") showSectionError("companies-grid", "Company ranking is temporarily unavailable.");
-      if (name === "providers") showSectionError("provider-list", "Provider status is temporarily unavailable.");
-      if (name === "system") setTelegram({});
+      return true;
+    } catch (_error) {
+      const usedCache = renderCachedState(name);
+      if (!usedCache) showFinalSectionFailure(name);
+      scheduleSlowRetry(name);
+      return false;
+    }
+  }
+
+  async function refreshAll(names = Object.keys(publicSections), options = {}) {
+    return Promise.allSettled(names.map((name) => refreshSection(name, options)));
+  }
+
+  async function manualRefresh() {
+    const button = byId("refresh-data");
+    const status = byId("data-refresh-status");
+    if (button) button.disabled = true;
+    if (status) status.textContent = "Refreshing...";
+    const results = await refreshAll(["market", "companies", "providers"]);
+    const successful = results.some((result) => result.status === "fulfilled" && result.value === true);
+    if (status) status.textContent = successful ? "Updated just now" : "Showing last verified data · retrying automatically";
+    if (button) button.disabled = false;
+  }
+
+  function setupPublicRefresh() {
+    const button = byId("refresh-data");
+    if (button) button.addEventListener("click", manualRefresh);
+    Object.entries(refreshIntervals).forEach(([name, milliseconds]) => {
+      window.setInterval(() => {
+        if (!document.hidden && navigator.onLine) refreshSection(name);
+      }, milliseconds);
     });
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden || !navigator.onLine) return;
+      Object.entries(refreshIntervals).forEach(([name, staleAfter]) => {
+        const state = sectionState.get(name);
+        if (!state || Date.now() - state.lastSuccess >= staleAfter) refreshSection(name);
+      });
+    });
+    window.addEventListener("offline", () => {
+      const status = byId("connection-status");
+      if (status) {
+        status.textContent = "You're offline. Showing last verified data.";
+        status.className = "is-offline";
+      }
+      Object.keys(publicSections).forEach(renderCachedState);
+    });
+    window.addEventListener("online", () => {
+      const status = byId("connection-status");
+      if (status) {
+        status.textContent = "Back online · refreshing verified data...";
+        status.className = "";
+      }
+      refreshAll();
+    });
+    refreshAll(Object.keys(publicSections), { initial: true });
   }
 
   function setupNavigation() {
@@ -384,6 +524,6 @@
     setupNavigation();
     setupReveals();
     setupLoginPage();
-    if (byId("market-grid")) loadPublicData();
+    if (byId("market-grid")) setupPublicRefresh();
   });
 })();

@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.0-flash"
     gemini_cooldown_seconds: int = 300
+    secondary_llm_provider: str = ""
+    secondary_llm_api_key: str = ""
+    secondary_llm_model: str = ""
 
     # --- Database ---------------------------------------------------------
     database_url: str = "sqlite:///data/atlas.db"
@@ -45,6 +48,8 @@ class Settings(BaseSettings):
     quote_cache_ttl_seconds: int = 30
     news_cache_ttl_seconds: int = 300
     fundamentals_cache_ttl_seconds: int = 21600
+    verified_quote_cache_seconds: int = 86400
+    verified_reference_cache_seconds: int = 2592000
     quote_stale_after_seconds: int = 900
     provider_timeout_seconds: float = 10.0
     provider_max_retries: int = 2

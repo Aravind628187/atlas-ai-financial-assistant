@@ -43,7 +43,7 @@ from app.models import (
 from app.services.financial_data_gateway import gateway
 from app.services.data_freshness import market_session_status
 from app.services.providers.base import DataStatus, QuoteData
-from app.services.runtime_state import runtime_state
+from app.services.runtime_state import reliability_telemetry, runtime_state
 from app.services.top_companies_service import top_companies_service
 
 
@@ -113,11 +113,13 @@ def _public_quote(symbol: str) -> dict:
     except Exception:
         result = None
     quote = result.data if result else None
+    verification = result.verification or {} if result else {}
+    cached_verified = bool(verification.get("cached_verified"))
     usable = bool(
         isinstance(quote, QuoteData) and quote.price is not None
-        and result.status not in {DataStatus.UNAVAILABLE, DataStatus.ERROR, DataStatus.STALE, DataStatus.CONFLICTING_DATA}
+        and result.status not in {DataStatus.UNAVAILABLE, DataStatus.ERROR, DataStatus.CONFLICTING_DATA}
+        and (result.status != DataStatus.STALE or cached_verified)
     )
-    verification = result.verification or {} if result else {}
     return {
         "symbol": symbol,
         "name": quote.name if usable else None,
@@ -127,7 +129,8 @@ def _public_quote(symbol: str) -> dict:
         "source": result.source if usable else None,
         "verified_with": verification.get("secondary_source") if verification.get("verified_fields") else None,
         "data_as_of": utc_iso(result.data_as_of) if usable else None,
-        "freshness": result.freshness if usable else "unavailable",
+        "retrieved_at": utc_iso(result.retrieved_at) if usable else None,
+        "freshness": "last_verified" if cached_verified and usable else result.freshness if usable else "unavailable",
         "market_status": result.market_status if result else market_session_status().value,
         "available": usable,
     }
@@ -349,6 +352,8 @@ def create_dashboard_app(telegram_application=None) -> FastAPI:
                     "change_pct": quote["change_pct"],
                     "quote_source": quote["source"],
                     "quote_freshness": quote["freshness"],
+                    "quote_data_as_of": quote["data_as_of"],
+                    "quote_retrieved_at": quote["retrieved_at"],
                     "quote_available": quote["available"],
                 })
             return {
@@ -848,7 +853,11 @@ def create_dashboard_app(telegram_application=None) -> FastAPI:
             triggered_alerts = db.scalar(select(func.count(Alert.id)).where(Alert.last_triggered_at.is_not(None))) or 0
         return {
             "data_quality": {"fetches_24h": fetches, "provider_errors_24h": failures, "stale_results_24h": stale},
-            "ai_reliability": {"deterministic_responses_24h": deterministic, "responses_blocked_24h": blocked},
+            "ai_reliability": {
+                "deterministic_responses_24h": deterministic,
+                "responses_blocked_24h": blocked,
+                **reliability_telemetry.snapshot(),
+            },
             "alert_activity": {
                 "active_alerts": active_alerts, "triggered_alerts": triggered_alerts,
                 "last_alert_check": utc_iso(runtime_state.last_alert_check),

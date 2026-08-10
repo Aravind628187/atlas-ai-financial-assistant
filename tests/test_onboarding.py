@@ -114,6 +114,99 @@ class DeterministicOnboardingTests(unittest.TestCase):
             self.assertNotIn("rate-limited", reply.lower())
         self.assertIsNone(user.briefing_hour_local)
 
+    def test_supported_briefing_time_formats_are_parsed_without_ai(self):
+        cases = (
+            ("9 AM IST", 9, "Asia/Kolkata", "9:00 AM IST"),
+            ("9:00 AM IST", 9, "Asia/Kolkata", "9:00 AM IST"),
+            ("9am ist", 9, "Asia/Kolkata", "9:00 AM IST"),
+            ("09:00", 9, "America/New_York", "9:00 AM ET"),
+            ("7am", 7, "America/New_York", "7:00 AM ET"),
+            ("18:00", 18, "America/New_York", "6:00 PM ET"),
+            ("morning", 7, "America/New_York", "7:00 AM ET"),
+        )
+        for index, (answer, hour, timezone, display) in enumerate(cases, 1):
+            with self.subTest(answer=answer):
+                user = User(
+                    telegram_id=3000 + index,
+                    onboarding_stage=OnboardingStage.ASKED_BRIEFING_TIME.value,
+                    timezone="America/New_York",
+                )
+                self.db.add(user)
+                self.db.flush()
+                with patch("app.ai.gemini_client.gemini.generate_json") as generate:
+                    reply = handle_text_turn(self.db, user, answer)
+                generate.assert_not_called()
+                self.assertEqual(user.briefing_hour_local, hour)
+                self.assertEqual(user.timezone, timezone)
+                self.assertIn(f"Got it — I'll send your daily briefing at {display}.", reply)
+                self.assertEqual(user.onboarding_stage, OnboardingStage.DONE.value)
+
+    def test_all_supported_timezone_labels_are_normalized(self):
+        expected = {
+            "IST": "Asia/Kolkata",
+            "UTC": "UTC",
+            "GMT": "Etc/GMT",
+            "EST": "America/New_York",
+            "EDT": "America/New_York",
+            "CST": "America/Chicago",
+            "CDT": "America/Chicago",
+            "MST": "America/Denver",
+            "MDT": "America/Denver",
+            "PST": "America/Los_Angeles",
+            "PDT": "America/Los_Angeles",
+        }
+        for index, (label, timezone) in enumerate(expected.items(), 1):
+            with self.subTest(label=label):
+                user = User(
+                    telegram_id=4000 + index,
+                    onboarding_stage=OnboardingStage.ASKED_BRIEFING_TIME.value,
+                )
+                self.db.add(user)
+                self.db.flush()
+                reply = handle_text_turn(self.db, user, f"9 AM {label}")
+                self.assertEqual(user.briefing_hour_local, 9)
+                self.assertEqual(user.timezone, timezone)
+                self.assertIn(f"9:00 AM {label}", reply)
+
+    def test_briefing_time_without_saved_timezone_uses_default(self):
+        user = User(
+            telegram_id=5001,
+            onboarding_stage=OnboardingStage.ASKED_BRIEFING_TIME.value,
+            timezone="",
+        )
+        self.db.add(user)
+        self.db.flush()
+        reply = handle_text_turn(self.db, user, "9 AM")
+        self.assertEqual(user.briefing_hour_local, 9)
+        self.assertEqual(user.timezone, "Asia/Kolkata")
+        self.assertIn("9:00 AM IST", reply)
+
+    def test_invalid_briefing_time_is_left_unset(self):
+        user = User(
+            telegram_id=5002,
+            onboarding_stage=OnboardingStage.ASKED_BRIEFING_TIME.value,
+            timezone="Asia/Kolkata",
+        )
+        self.db.add(user)
+        self.db.flush()
+        reply = handle_text_turn(self.db, user, "whenever the market feels interesting")
+        self.assertIsNone(user.briefing_hour_local)
+        self.assertEqual(user.timezone, "Asia/Kolkata")
+        self.assertIn("couldn't confidently parse", reply)
+
+    def test_skip_briefing_time_remains_supported(self):
+        user = User(
+            telegram_id=5003,
+            onboarding_stage=OnboardingStage.ASKED_BRIEFING_TIME.value,
+            timezone="Asia/Kolkata",
+        )
+        self.db.add(user)
+        self.db.flush()
+        reply = handle_text_turn(self.db, user, "skip")
+        self.assertIsNone(user.briefing_hour_local)
+        self.assertEqual(user.timezone, "Asia/Kolkata")
+        self.assertIn("No daily briefing time was set", reply)
+
     def test_completed_user_does_not_restart_onboarding(self):
         user = User(telegram_id=200, onboarding_stage=OnboardingStage.DONE.value, role="Student")
         self.db.add(user)

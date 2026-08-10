@@ -22,12 +22,15 @@ from app.services.providers.newsapi_provider import NewsAPIProvider
 from app.services.providers.rss_provider import RSSNewsProvider
 from app.services.providers.twelve_data_provider import TwelveDataProvider
 from app.services.providers.yfinance_provider import YFinanceProvider
+from app.services.runtime_state import reliability_telemetry
 
 
 logger = logging.getLogger("atlas.financial_router")
 UTC = dt.timezone.utc
 FAILURE_THRESHOLD = 3
-CIRCUIT_SECONDS = 120
+TRANSIENT_CIRCUIT_SECONDS = 120
+QUOTA_CIRCUIT_SECONDS = 1800
+ENTITLEMENT_CIRCUIT_SECONDS = 3600
 EARNINGS_MAX_UNVERIFIED_DAYS = 120
 EARNINGS_AGREEMENT_DAYS = 3
 
@@ -141,7 +144,14 @@ class FinancialDataRouter:
             state.last_failure_at, state.latency_ms, state.failure_reason = dt.datetime.now(UTC), round(latency, 2), reason
             state.status = reason if reason in {"invalid_credentials", "rate_limited", "not_entitled"} else "degraded"
             if state.consecutive_failures >= FAILURE_THRESHOLD or reason in {"invalid_credentials", "rate_limited", "not_entitled"}:
-                state.circuit_until = time.monotonic() + CIRCUIT_SECONDS
+                if reason == "invalid_credentials":
+                    state.circuit_until = float("inf")
+                elif reason == "rate_limited":
+                    state.circuit_until = time.monotonic() + QUOTA_CIRCUIT_SECONDS
+                elif reason == "not_entitled":
+                    state.circuit_until = time.monotonic() + ENTITLEMENT_CIRCUIT_SECONDS
+                else:
+                    state.circuit_until = time.monotonic() + TRANSIENT_CIRCUIT_SECONDS
                 state.status = reason if reason in {"invalid_credentials", "rate_limited", "not_entitled"} else "error"
 
     def _call(self, name: str, provider: Any, intent: str, symbol: str, *args) -> FinancialDataResult:
@@ -214,10 +224,13 @@ class FinancialDataRouter:
                 primary, winner_index = result, index
                 break
             failures.append(f"{name}:{result.error or result.status.value}")
+            if index == 0:
+                reliability_telemetry.increment("primary_provider_failed")
         if primary is None:
             return unavailable_result("none", symbol, intent, "; ".join(failures))
         if winner_index > 0:
             with self._lock: self.fallback_usage += 1
+            reliability_telemetry.increment("fallback_provider_used")
         if verify and winner_index + 1 < len(candidates):
             for second_name, second_provider in candidates[winner_index + 1:]:
                 secondary = self._call(second_name, second_provider, intent, symbol, *args)

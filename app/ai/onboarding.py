@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
@@ -37,6 +38,41 @@ EMBEDDED_TIME_RE = re.compile(
     r"\b(?:at|around|by)\s+(\d{1,2})(?::([0-5]\d))?\s*(am|pm)?\b",
     re.IGNORECASE,
 )
+TIMEZONE_SUFFIX_RE = re.compile(
+    r"\s+(IST|UTC|GMT|EST|EDT|CST|CDT|MST|MDT|PST|PDT)\s*$",
+    re.IGNORECASE,
+)
+TIMEZONE_ALIASES = {
+    "IST": "Asia/Kolkata",
+    "UTC": "UTC",
+    "GMT": "Etc/GMT",
+    "EST": "America/New_York",
+    "EDT": "America/New_York",
+    "CST": "America/Chicago",
+    "CDT": "America/Chicago",
+    "MST": "America/Denver",
+    "MDT": "America/Denver",
+    "PST": "America/Los_Angeles",
+    "PDT": "America/Los_Angeles",
+}
+TIMEZONE_DISPLAY_LABELS = {
+    "Asia/Kolkata": "IST",
+    "UTC": "UTC",
+    "Etc/UTC": "UTC",
+    "GMT": "GMT",
+    "Etc/GMT": "GMT",
+    "America/New_York": "ET",
+    "America/Chicago": "CT",
+    "America/Denver": "MT",
+    "America/Los_Angeles": "PT",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedBriefingTime:
+    hour: int
+    timezone: str
+    timezone_label: str
 
 
 WELCOME = (
@@ -111,11 +147,22 @@ def _add_watchlist_symbols(db: Session, user: User, symbols: list[str]) -> list[
     return added
 
 
-def _parse_briefing_hour(text: str) -> int | None:
-    """Parse common local-time answers without guessing unusual free text."""
+def _parse_briefing_time(text: str, saved_timezone: str | None) -> ParsedBriefingTime | None:
+    """Parse a simple briefing time and its optional timezone deterministically."""
     if _looks_like_skip(text):
         return None
-    phrase = _normalized_phrase(text)
+
+    timezone_match = TIMEZONE_SUFFIX_RE.search(text)
+    if timezone_match:
+        timezone_label = timezone_match.group(1).upper()
+        timezone = TIMEZONE_ALIASES[timezone_label]
+        time_text = text[:timezone_match.start()].strip()
+    else:
+        timezone = (saved_timezone or settings.default_timezone).strip() or settings.default_timezone
+        timezone_label = TIMEZONE_DISPLAY_LABELS.get(timezone, timezone)
+        time_text = text
+
+    phrase = _normalized_phrase(time_text)
     named_hours = {
         "morning": 7,
         "in the morning": 7,
@@ -131,17 +178,28 @@ def _parse_briefing_hour(text: str) -> int | None:
         "midnight": 0,
     }
     if phrase in named_hours:
-        return named_hours[phrase]
-    match = SIMPLE_TIME_RE.fullmatch(text) or EMBEDDED_TIME_RE.search(text)
+        return ParsedBriefingTime(named_hours[phrase], timezone, timezone_label)
+    match = SIMPLE_TIME_RE.fullmatch(time_text) or EMBEDDED_TIME_RE.search(time_text)
     if not match:
         return None
     hour = int(match.group(1))
+    minute = int(match.group(2) or "0")
+    if minute != 0:
+        return None
     meridiem = (match.group(3) or "").lower()
     if meridiem:
         if not 1 <= hour <= 12:
             return None
-        return (hour % 12) + (12 if meridiem == "pm" else 0)
-    return hour if 0 <= hour <= 23 else None
+        hour = (hour % 12) + (12 if meridiem == "pm" else 0)
+    elif not 0 <= hour <= 23:
+        return None
+    return ParsedBriefingTime(hour, timezone, timezone_label)
+
+
+def _format_briefing_time(parsed: ParsedBriefingTime) -> str:
+    display_hour = parsed.hour % 12 or 12
+    meridiem = "AM" if parsed.hour < 12 else "PM"
+    return f"{display_hour}:00 {meridiem} {parsed.timezone_label}"
 
 
 def _store_text_preference(db: Session, user: User, key: str, text: str) -> None:
@@ -197,14 +255,15 @@ def handle_onboarding_turn(db: Session, user: User, text: str) -> str:
 
     if stage == OnboardingStage.ASKED_BRIEFING_TIME.value:
         skipped = _looks_like_skip(text)
-        hour = _parse_briefing_hour(text)
-        user.briefing_hour_local = hour
-        if hour is not None:
-            upsert_preference(db, user, "briefing_hour_local", str(hour))
+        parsed = _parse_briefing_time(text, user.timezone)
+        user.briefing_hour_local = parsed.hour if parsed else None
+        if parsed:
+            user.timezone = parsed.timezone
+            upsert_preference(db, user, "briefing_hour_local", str(parsed.hour))
         user.onboarding_stage = OnboardingStage.DONE.value
         db.flush()
-        if hour is not None:
-            schedule_note = f"Your daily briefing is set for {hour:02d}:00 in your configured timezone."
+        if parsed:
+            schedule_note = f"Got it — I'll send your daily briefing at {_format_briefing_time(parsed)}."
         elif skipped:
             schedule_note = "No daily briefing time was set. You can add one whenever you want."
         else:

@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.ai.gemini_client import GeminiUnavailableError, gemini
+from app.ai.llm_gateway import SecondaryLLMUnavailableError, llm_gateway
 from app.ai.prompts import PERSONALIZATION_EXTRACTOR_SYSTEM
 from app.models import Message, Preference, User
 
@@ -64,12 +65,12 @@ def extract_and_store_personalization(db: Session, user: User, user_message: str
     if not any(marker in user_message.lower() for marker in durable_markers):
         return
     try:
-        data = gemini.generate_json(user_message, system_instruction=PERSONALIZATION_EXTRACTOR_SYSTEM)
+        data = llm_gateway.generate_json(user_message, system_instruction=PERSONALIZATION_EXTRACTOR_SYSTEM)
         for fact in data.get("facts", []):
             key, value = fact.get("key"), fact.get("value")
             if key and value:
                 upsert_preference(db, user, key[:64], str(value)[:512])
-    except GeminiUnavailableError:
+    except (GeminiUnavailableError, SecondaryLLMUnavailableError):
         logger.info("Skipping personalization while Gemini is unavailable")
     except Exception:  # noqa: BLE001 — personalization must never break the chat flow
         logger.exception("Personalization extraction failed; continuing without it.")

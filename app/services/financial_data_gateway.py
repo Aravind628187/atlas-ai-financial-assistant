@@ -9,11 +9,12 @@ import uuid
 from dataclasses import replace
 from app.config import settings
 from app.services.data_freshness import Freshness, market_session_status, quote_freshness
-from app.services.providers.base import DataStatus, FinancialDataResult, QuoteData
+from app.services.providers.base import DataStatus, EarningsData, FinancialDataResult, QuoteData
 from app.services.providers.finnhub_provider import FinnhubProvider
 from app.services.providers.yfinance_provider import YFinanceProvider
 from app.services.providers.sec_provider import SECProvider
 from app.services.financial_data_router import FinancialDataRouter
+from app.services.runtime_state import reliability_telemetry
 
 
 logger = logging.getLogger("atlas.data_gateway")
@@ -22,7 +23,7 @@ UTC = dt.timezone.utc
 
 class TTLCache:
     def __init__(self) -> None:
-        self._entries: dict[str, tuple[float, FinancialDataResult]] = {}
+        self._entries: dict[str, tuple[float, float, FinancialDataResult]] = {}
         self._lock = threading.Lock()
 
     def get(self, key: str) -> FinancialDataResult | None:
@@ -30,20 +31,48 @@ class TTLCache:
             entry = self._entries.get(key)
             if not entry:
                 return None
-            expires, value = entry
+            expires, _, value = entry
             if time.monotonic() >= expires:
-                self._entries.pop(key, None)
                 return None
             return replace(value, cache_hit=True)
 
+    def get_last_verified(self, key: str, max_age_seconds: int) -> FinancialDataResult | None:
+        """Return a previously accepted result, explicitly marked as historical cache."""
+        with self._lock:
+            entry = self._entries.get(key)
+            if not entry:
+                return None
+            _, stored_at, value = entry
+            if time.monotonic() - stored_at > max_age_seconds:
+                self._entries.pop(key, None)
+                return None
+            if value.data is None or value.status in {
+                DataStatus.UNAVAILABLE, DataStatus.ERROR, DataStatus.CONFLICTING_DATA,
+                DataStatus.INVALID_CREDENTIALS, DataStatus.RATE_LIMITED, DataStatus.NOT_ENTITLED,
+            }:
+                return None
+            if isinstance(value.data, EarningsData) and value.data.status == "unverified":
+                return None
+            verification = {
+                **(value.verification or {}),
+                "cached_verified": True,
+                "current_providers_unavailable": True,
+                "original_status": value.status.value,
+            }
+            return replace(
+                value, status=DataStatus.STALE, cache_hit=True, is_realtime=False,
+                is_delayed=True, is_stale=True, verification=verification,
+            )
+
     def set(self, key: str, value: FinancialDataResult, ttl: int) -> None:
         with self._lock:
-            self._entries[key] = (time.monotonic() + ttl, value)
+            now = time.monotonic()
+            self._entries[key] = (now + ttl, now, value)
 
     def state(self) -> dict[str, int]:
         now = time.monotonic()
         with self._lock:
-            active = sum(1 for expires, _ in self._entries.values() if expires > now)
+            active = sum(1 for expires, _, _ in self._entries.values() if expires > now)
             return {"active_entries": active, "total_entries": len(self._entries)}
 
 
@@ -83,6 +112,8 @@ class FinancialDataGateway:
         self.last_failure: dict | None = None
         self.rejected_disagreements = 0
         self._lock = threading.Lock()
+        self._request_locks: dict[str, threading.Lock] = {}
+        self._request_locks_guard = threading.Lock()
 
     @property
     def providers(self):
@@ -147,6 +178,7 @@ class FinancialDataGateway:
             self._log_fetch(uuid.uuid4().hex[:16], cached.source, operation, clean,
                             cached.status.value, 0.0, None, cache_hit=True)
             return cached
+        last_verified = self.cache.get_last_verified(key, self._retention_seconds(operation))
         failures: list[str] = []
         for provider in self.providers:
             result = self._call(provider, operation, clean, *args)
@@ -154,15 +186,38 @@ class FinancialDataGateway:
                 self.cache.set(key, result, ttl)
                 return result
             failures.append(f"{provider.name}:{result.error or 'unavailable'}")
+        if last_verified:
+            reliability_telemetry.increment("cached_financial_data_used")
+            return last_verified
         return self._unavailable(clean, operation, "; ".join(failures))
+
+    @staticmethod
+    def _retention_seconds(operation: str) -> int:
+        if operation == "get_quote":
+            return settings.verified_quote_cache_seconds
+        if operation == "get_news":
+            return min(settings.verified_reference_cache_seconds, 86400)
+        return settings.verified_reference_cache_seconds
+
+    def _request_lock(self, key: str) -> threading.Lock:
+        with self._request_locks_guard:
+            return self._request_locks.setdefault(key, threading.Lock())
 
     def _routed_fetch(self, intent: str, operation: str, symbol: str, ttl: int, *args, verify: bool = False) -> FinancialDataResult:
         clean = symbol.strip().upper()
         key = f"{operation}:{clean}:{args}:verify={verify}"
+        # Coalesce concurrent identical requests. The second caller rechecks
+        # the cache after the first completes instead of spending more quota.
+        with self._request_lock(key):
+            return self._routed_fetch_locked(intent, operation, clean, key, ttl, *args, verify=verify)
+
+    def _routed_fetch_locked(self, intent: str, operation: str, clean: str, key: str,
+                             ttl: int, *args, verify: bool = False) -> FinancialDataResult:
         cached = self.cache.get(key)
         if cached:
             self._log_fetch(uuid.uuid4().hex[:16], cached.source, operation, clean, cached.status.value, 0.0, None, cache_hit=True)
             return cached
+        last_verified = self.cache.get_last_verified(key, self._retention_seconds(operation))
         result = self.router.fetch(intent, clean, *args, verify=verify) if self.router else self._cached_fetch(operation, clean, ttl, *args)
         self._log_fetch(uuid.uuid4().hex[:16], result.source, operation, clean, result.status.value, 0.0, result.error)
         if result.data is not None and result.status not in {DataStatus.UNAVAILABLE, DataStatus.ERROR, DataStatus.CONFLICTING_DATA}:
@@ -173,6 +228,9 @@ class FinancialDataGateway:
             with self._lock:
                 self.last_failure = {"provider": result.source, "operation": operation, "symbol": clean,
                                      "error_type": result.error, "at": dt.datetime.now(UTC).isoformat()}
+            if result.status != DataStatus.CONFLICTING_DATA and last_verified:
+                reliability_telemetry.increment("cached_financial_data_used")
+                return last_verified
         return result
 
     def get_quote(self, symbol: str, verify: bool = True) -> FinancialDataResult:
@@ -227,7 +285,7 @@ class FinancialDataGateway:
         return self._routed_fetch("news", "get_news", symbol, settings.news_cache_ttl_seconds, limit) if self.router else self._cached_fetch("get_news", symbol, settings.news_cache_ttl_seconds, limit)
 
     def get_market_news(self, limit: int = 6) -> FinancialDataResult:
-        return self.router.fetch("market_news", "MARKET", limit) if self.router else self._unavailable("MARKET", "market_news")
+        return self._routed_fetch("market_news", "get_market_news", "MARKET", settings.news_cache_ttl_seconds, limit) if self.router else self._unavailable("MARKET", "market_news")
 
     def get_earnings(self, symbol: str) -> FinancialDataResult:
         return self._routed_fetch("earnings", "get_earnings", symbol, settings.fundamentals_cache_ttl_seconds) if self.router else self._cached_fetch("get_earnings", symbol, settings.fundamentals_cache_ttl_seconds)
@@ -241,12 +299,16 @@ class FinancialDataGateway:
         cached = self.cache.get(key)
         if cached:
             return cached
+        last_verified = self.cache.get_last_verified(key, settings.verified_reference_cache_seconds)
         result = self._call(self.sec, "get_filings", clean, forms, limit)
         if result.status != DataStatus.UNAVAILABLE and result.data is not None:
             self.cache.set(key, result, settings.sec_cache_ttl_seconds)
             self.sec_last_success = result.retrieved_at
         else:
             self.sec_last_failure = dt.datetime.now(UTC)
+            if last_verified:
+                reliability_telemetry.increment("cached_financial_data_used")
+                return last_verified
         return result
 
     def health(self) -> dict:

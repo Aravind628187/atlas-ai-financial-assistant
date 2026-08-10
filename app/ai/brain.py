@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.ai import onboarding
 from app.ai.gemini_client import gemini
+from app.ai.llm_gateway import llm_gateway
 from app.ai.financial_response_validator import validate_financial_response
 from app.ai.intent_router import RoutedIntent, route
 from app.ai.memory import extract_and_store_personalization, get_preferences, get_recent_history, log_message, upsert_preference
@@ -92,14 +93,15 @@ def _quote_reply(symbol: str) -> str:
         if (result.verification or {}).get("disagreement"):
             return f"Two sources currently disagree on **{symbol}**, so I won't present one price as definitive."
         return f"I can't verify a sufficiently reliable **{symbol}** quote right now, so I won't provide an exact price."
-    if result.status == DataStatus.STALE:
+    cached_verified = bool((result.verification or {}).get("cached_verified"))
+    if result.status == DataStatus.STALE and not cached_verified:
         return (
             f"I found a **{symbol}** quote, but it is stale for the current session. "
             "I won't present it as a current price."
         )
     currency = quote.currency or ""
     session = (result.market_status or (result.verification or {}).get("market_session") or "closed").lower()
-    title = "Currently Trading" if session == "open" and result.is_realtime else "Latest Available"
+    title = "Last Verified Data" if cached_verified else "Currently Trading" if session == "open" and result.is_realtime else "Latest Available"
     lines = [f"**{symbol} — {title}**", "", f"Price: **{_fmt_number(quote.price)} {currency}**".rstrip()]
     if quote.change is not None and quote.change_pct is not None:
         lines.append(f"Move: **{quote.change:+,.2f} ({quote.change_pct:+.2f}%)**")
@@ -113,6 +115,8 @@ def _quote_reply(symbol: str) -> str:
     else:
         lines.append(f"As of: {_as_of(result)}")
     lines.append(f"Source: {result.source}")
+    if cached_verified:
+        lines.append("Current providers are temporarily unavailable; this is a cached verified value, not a live quote.")
     verified_with = (result.verification or {}).get("secondary_source")
     if verified_with and (result.verification or {}).get("verified_fields") and not (result.verification or {}).get("disagreement"):
         lines.append(f"Verified with: {verified_with}")
@@ -144,7 +148,9 @@ def _fundamentals_reply(symbol: str, request: str) -> str:
     if not available:
         return f"**{symbol}:** the provider did not return that field, so I won't fill it from model memory."
     body = "\n".join(f"• {label}: **{value}**" for label, value in available)
-    return f"**{symbol} — Verified fundamentals**\n\n{body}\n\nSource: {result.source}\nRetrieved: {result.retrieved_at:%Y-%m-%d %H:%M UTC}"
+    cached_note = "\nCurrent providers are temporarily unavailable; these are cached verified values." if (result.verification or {}).get("cached_verified") else ""
+    title = "Last verified fundamentals" if cached_note else "Verified fundamentals"
+    return f"**{symbol} — {title}**\n\n{body}\n\nSource: {result.source}\nRetrieved: {result.retrieved_at:%Y-%m-%d %H:%M UTC}{cached_note}"
 
 
 def _news_reply(symbol: str) -> str:
@@ -233,6 +239,8 @@ def _historical_reply(symbol: str, text: str) -> str:
             max_drawdown = min(max_drawdown, (close - peak) / peak * 100)
     lines.append(f"Maximum close-to-close drawdown: **{max_drawdown:.2f}%**")
     lines.extend([f"Through: {_as_of(result)}", f"Source: {result.source}"])
+    if (result.verification or {}).get("cached_verified"):
+        lines.append("Current providers are temporarily unavailable; this history came from the last verified cache.")
     return "\n".join(lines)
 
 
@@ -404,7 +412,7 @@ def _get_validated_ranking(db: Session, user: User, count: int) -> tuple[list[To
 def _top_companies(db: Session, user: User, intent: str, text: str) -> str:
     count = _top_company_count(text)
     if count > 25:
-        return "Please choose 25 companies or fewer because very large watchlists reduce briefing quality and consume unnecessary provider quota."
+        return "Please choose 25 companies or fewer because very large watchlists reduce briefing quality and consume unnecessary data requests."
     count = max(1, count)
     follow_up = bool(re.fullmatch(r"(?:please\s+)?(?:track|add)\s+these[.!?]*", text.strip(), re.IGNORECASE))
     skipped: list[str] = []
@@ -596,6 +604,8 @@ def _filings_reply(symbol: str, text: str) -> str:
         if filing.report_date:
             lines.extend(["", "Reporting period:", filing.report_date.isoformat()])
         lines.extend(["", "Source:", "SEC EDGAR"])
+        if (result.verification or {}).get("cached_verified"):
+            lines.extend(["", "SEC EDGAR is temporarily unavailable; this is the last verified cached filing metadata."])
         if filing.url:
             lines.extend(["", "Filing:", filing.url])
         lines.extend(["", "Ask me to summarize it or compare it with the previous quarter."])
@@ -606,6 +616,8 @@ def _filings_reply(symbol: str, text: str) -> str:
         link = f"\n  {filing.url}" if filing.url else ""
         lines.append(f"• **{filing.form}** · filed {filing.filed_at.isoformat()}{report}{link}")
     lines.extend(["", f"Source: {result.source}", f"Retrieved: {result.retrieved_at:%Y-%m-%d %H:%M UTC}"])
+    if (result.verification or {}).get("cached_verified"):
+        lines.append("SEC EDGAR is temporarily unavailable; this is the last verified cached filing metadata.")
     return "\n".join(lines)
 
 
@@ -654,12 +666,32 @@ def _general_reply(text: str, history: list[dict], preferences: dict) -> str:
     if any(word in text.lower() for word in ("today", "current", "latest", "right now")):
         return "I don't have a verified live source for that non-financial question, so I won't present a current claim as fact."
     try:
-        return gemini.generate(
+        return llm_gateway.generate(
             f"User preferences: {preferences}\nUser message: {text}",
             system_instruction=ASSISTANT_PERSONA, history=history[-6:], temperature=0.4,
         )
     except Exception:
         return "I can't reach the language service right now. Financial commands and deterministic calculations are still available."
+
+
+def _multi_part_financial_reply(symbol: str, text: str) -> str | None:
+    """Return independently retrieved sections so one unavailable part cannot erase the rest."""
+    lowered = text.lower()
+    requested = {
+        "quote": any(term in lowered for term in ("price", "quote", "latest move")),
+        "fundamentals": any(term in lowered for term in ("fundamentals", "valuation", "revenue", "margin", "p/e")),
+        "news": any(term in lowered for term in ("news", "headlines", "developments")),
+    }
+    if sum(requested.values()) < 2 or not any(separator in lowered for separator in (",", " and ")):
+        return None
+    sections: list[str] = []
+    if requested["quote"]:
+        sections.append(_quote_reply(symbol))
+    if requested["fundamentals"]:
+        sections.append(_fundamentals_reply(symbol, text))
+    if requested["news"]:
+        sections.append(_news_reply(symbol))
+    return "\n\n".join(sections)
 
 
 def _handle_completed_user(db: Session, user: User, text: str, routed: RoutedIntent) -> str:
@@ -681,6 +713,10 @@ def _handle_completed_user(db: Session, user: User, text: str, routed: RoutedInt
             "Putting all your money into one stock creates severe concentration risk. I can provide verified company data and scenario analysis, "
             "but I can't guarantee returns or recommend an all-in allocation. Diversification, time horizon, liquidity needs, and loss tolerance all matter."
         )
+    if symbols:
+        partial = _multi_part_financial_reply(symbols[0], text)
+        if partial:
+            return partial
     if intent in {"market_quote", "market_move"}:
         return _quote_reply(symbols[0]) if symbols else "Which company or ticker do you want a verified quote for?"
     if intent == "company_news":

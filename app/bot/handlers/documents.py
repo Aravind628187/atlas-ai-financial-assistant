@@ -9,6 +9,7 @@ from telegram.ext import ContextTypes
 
 from app.ai.memory import log_message
 from app.ai.gemini_client import GeminiUnavailableError
+from app.ai.llm_gateway import SecondaryLLMUnavailableError
 from app.bot.handlers.common import chunk_for_telegram, get_or_create_user
 from app.bot.formatting import reply_with_html_fallback
 from app.database import get_session
@@ -57,9 +58,9 @@ async def handle_document_message(update: Update, context: ContextTypes.DEFAULT_
 
     try:
         extracted, summary = await asyncio.to_thread(process_file)
-    except GeminiUnavailableError:
-        logger.warning("Document summary skipped while Gemini is rate-limited")
-        await message.reply_text("Document analysis is temporarily rate-limited. Please try again later.")
+    except (GeminiUnavailableError, SecondaryLLMUnavailableError):
+        logger.warning("Document summary synthesis is temporarily unavailable")
+        await message.reply_text("Document analysis is temporarily unavailable. Please try again later.")
         return
     except Exception:
         logger.exception("Document processing failed for %s", filename)
@@ -118,8 +119,8 @@ async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYP
     try:
         summary = await asyncio.to_thread(summarize_image, file_bytes, "image/jpeg", "photo")
     except GeminiUnavailableError:
-        logger.warning("Image analysis skipped while Gemini is rate-limited")
-        await message.reply_text("Image analysis is temporarily rate-limited. Please try again later.")
+        logger.warning("Image analysis is temporarily unavailable")
+        await message.reply_text("Image analysis is temporarily unavailable. Please try again later.")
         return
     except Exception:
         logger.exception("Image processing failed")

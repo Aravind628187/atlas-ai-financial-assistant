@@ -144,6 +144,8 @@ p, h1, h2, h3 { margin-top: 0; }
 .market-tape-track { min-width: 0; display: flex; align-items: center; gap: 34px; padding: 0 30px; white-space: nowrap; color: var(--muted); overflow: hidden; }.market-tape-track span { display: inline-flex; gap: 8px; }.market-tape-track b { color: var(--text); font-weight: 600; }
 .market-section { background: linear-gradient(180deg, #080d15, var(--bg)); }
 .market-pill { min-width: 145px; padding: 10px 14px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); }.market-pill span { display: block; color: var(--faint); font: .56rem/1.5 var(--mono); letter-spacing: .12em; }.market-pill b { display: block; color: var(--text); font: 650 .75rem/1.5 var(--mono); }.market-pill.is-open b { color: var(--green); }.market-pill.is-closed b { color: var(--amber); }
+.market-heading-actions { display: flex; align-items: flex-end; flex-direction: column; gap: 9px; }
+.data-refresh { padding: 0; border: 0; color: var(--faint); background: transparent; cursor: pointer; font: .59rem/1.4 var(--mono); transition: color .2s; }.data-refresh:hover { color: var(--cyan); }.data-refresh:disabled { cursor: wait; opacity: .65; }
 .market-grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; }
 .market-card { min-height: 205px; padding: 22px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: linear-gradient(145deg, rgba(18,28,43,.92), rgba(10,16,26,.92)); transition: transform .22s, border-color .22s; }
 .market-card:hover { transform: translateY(-4px); border-color: rgba(105,216,255,.28); }
@@ -154,6 +156,7 @@ p, h1, h2, h3 { margin-top: 0; }
 .market-source { display: flex; justify-content: space-between; gap: 10px; margin-top: 23px; color: var(--faint); font: .55rem/1.4 var(--mono); text-transform: uppercase; }.market-source span:last-child { text-align: right; }
 .unavailable-copy { margin-top: 36px; color: var(--muted); font: .8rem/1.5 var(--mono); }
 .data-note { margin: 18px 0 0; color: var(--faint); font-size: .72rem; }
+.data-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; margin-top: 18px; color: var(--faint); font: .62rem/1.5 var(--mono); }.data-meta .data-note { margin: 0; flex: 1 1 420px; }.data-meta span:empty { display: none; }.data-meta .is-offline { color: var(--amber); }
 
 /* Companies */
 .companies-section { background: #080d15; }

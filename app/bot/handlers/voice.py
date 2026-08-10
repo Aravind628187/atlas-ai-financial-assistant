@@ -30,8 +30,8 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
     try:
         transcript = await asyncio.to_thread(gemini.transcribe_and_understand, audio_bytes, "audio/ogg")
     except GeminiUnavailableError:
-        logger.warning("Voice transcription skipped while Gemini is rate-limited")
-        await message.reply_text("Voice transcription is temporarily rate-limited. Please type your request—quotes, alerts, watchlists, and calculations still work.")
+        logger.warning("Voice transcription is temporarily unavailable")
+        await message.reply_text("Voice transcription is temporarily unavailable. Please type your request—quotes, alerts, watchlists, and calculations still work.")
         return
     except Exception:
         logger.exception("Voice transcription failed")
