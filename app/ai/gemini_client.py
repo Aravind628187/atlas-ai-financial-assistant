@@ -10,16 +10,42 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
 import google.generativeai as genai
-from tenacity import retry, stop_after_attempt, wait_exponential
+from google.api_core import exceptions as google_exceptions
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from app.config import settings
 
 logger = logging.getLogger("atlas.gemini")
 
 _configured = False
+
+
+class GeminiUnavailableError(RuntimeError):
+    """Expected temporary Gemini outage/quota state safe for user-facing fallbacks."""
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    non_retryable = (
+        GeminiUnavailableError,
+        google_exceptions.ResourceExhausted,
+        google_exceptions.TooManyRequests,
+        google_exceptions.PermissionDenied,
+        google_exceptions.Unauthenticated,
+        google_exceptions.InvalidArgument,
+    )
+    return not isinstance(exc, non_retryable)
+
+
+gemini_retry = retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    retry=retry_if_exception(_is_retryable),
+    reraise=True,
+)
 
 
 def _ensure_configured() -> None:
@@ -39,11 +65,23 @@ class GeminiClient:
         _ensure_configured()
         self.model_name = model_name or settings.gemini_model
         self._model = genai.GenerativeModel(self.model_name)
+        self._disabled_until = 0.0
+
+    def _check_available(self) -> None:
+        if not settings.gemini_api_key:
+            raise GeminiUnavailableError("Gemini is not configured")
+        remaining = self._disabled_until - time.monotonic()
+        if remaining > 0:
+            raise GeminiUnavailableError(f"Gemini cooling down for {remaining:.0f}s")
+
+    def _mark_quota_exhausted(self) -> None:
+        self._disabled_until = time.monotonic() + max(30, settings.gemini_cooldown_seconds)
+        logger.warning("Gemini quota/rate limit reached; pausing AI calls for %ss", settings.gemini_cooldown_seconds)
 
     # ------------------------------------------------------------------
     # Core text generation (with optional chat history + system prompt)
     # ------------------------------------------------------------------
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
+    @gemini_retry
     def generate(
         self,
         prompt: str,
@@ -55,6 +93,7 @@ class GeminiClient:
         """
         history: list of {"role": "user"|"model", "content": str}
         """
+        self._check_available()
         model = genai.GenerativeModel(self.model_name, system_instruction=system_instruction)
         generation_config: dict[str, Any] = {"temperature": temperature}
         if json_mode:
@@ -66,7 +105,11 @@ class GeminiClient:
             contents.append({"role": role, "parts": [turn["content"]]})
         contents.append({"role": "user", "parts": [prompt]})
 
-        response = model.generate_content(contents, generation_config=generation_config)
+        try:
+            response = model.generate_content(contents, generation_config=generation_config)
+        except (google_exceptions.ResourceExhausted, google_exceptions.TooManyRequests) as exc:
+            self._mark_quota_exhausted()
+            raise GeminiUnavailableError("Gemini quota is temporarily exhausted") from exc
         return (response.text or "").strip()
 
     # ------------------------------------------------------------------
@@ -95,25 +138,31 @@ class GeminiClient:
     # ------------------------------------------------------------------
     # Multimodal: images (charts, screenshots, document pages)
     # ------------------------------------------------------------------
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
+    @gemini_retry
     def analyze_image(self, image_bytes: bytes, mime_type: str, prompt: str) -> str:
-        response = self._model.generate_content(
-            [{"mime_type": mime_type, "data": image_bytes}, prompt]
-        )
+        self._check_available()
+        try:
+            response = self._model.generate_content([{"mime_type": mime_type, "data": image_bytes}, prompt])
+        except (google_exceptions.ResourceExhausted, google_exceptions.TooManyRequests) as exc:
+            self._mark_quota_exhausted()
+            raise GeminiUnavailableError("Gemini quota is temporarily exhausted") from exc
         return (response.text or "").strip()
 
     # ------------------------------------------------------------------
     # Multimodal: voice notes (Gemini transcribes + understands directly)
     # ------------------------------------------------------------------
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
+    @gemini_retry
     def transcribe_and_understand(self, audio_bytes: bytes, mime_type: str = "audio/ogg") -> str:
+        self._check_available()
         prompt = (
             "Transcribe this voice message from a finance professional talking to their "
             "AI financial assistant. Return ONLY the transcribed text, nothing else."
         )
-        response = self._model.generate_content(
-            [{"mime_type": mime_type, "data": audio_bytes}, prompt]
-        )
+        try:
+            response = self._model.generate_content([{"mime_type": mime_type, "data": audio_bytes}, prompt])
+        except (google_exceptions.ResourceExhausted, google_exceptions.TooManyRequests) as exc:
+            self._mark_quota_exhausted()
+            raise GeminiUnavailableError("Gemini quota is temporarily exhausted") from exc
         return (response.text or "").strip()
 
 

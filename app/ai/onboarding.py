@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.ai.gemini_client import gemini
 from app.models import OnboardingStage, User, WatchlistItem
 from app.ai.memory import upsert_preference
+from app.services.entity_resolution import resolve_entities
 
 logger = logging.getLogger("atlas.onboarding")
 
@@ -54,6 +55,9 @@ def _extract_role(text: str) -> str | None:
 def _extract_tickers(text: str) -> list[str]:
     if _looks_like_skip(text):
         return []
+    resolved = resolve_entities(text).symbols
+    if resolved:
+        return resolved
     data = gemini.generate_json(
         f'User said they follow: "{text}". Extract stock tickers if you can confidently infer them '
         f"from company names (e.g. Apple -> AAPL, Tesla -> TSLA). ",

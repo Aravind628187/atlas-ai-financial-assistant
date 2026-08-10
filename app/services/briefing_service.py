@@ -1,48 +1,106 @@
-"""
-Builds the personalized morning brief: pulls real quotes + news for the
-user's watchlist/preferred sectors, then asks Gemini to write it up —
-grounded in retrieved facts, never invented.
-"""
+"""Deterministic, fully grounded morning intelligence builder."""
 from __future__ import annotations
 
-import json
-import logging
+from app.config import settings
+from app.models import Preference, User, WatchlistItem
+from app.services.financial_data_gateway import gateway
+from app.services.providers.base import DataStatus, EarningsData, NewsItem, QuoteData
 
-from app.ai.gemini_client import gemini
-from app.ai.prompts import DAILY_BRIEFING_SYSTEM
-from app.models import User, WatchlistItem, Preference
-from app.services import market_data, news_service
 
-logger = logging.getLogger("atlas.briefing")
+def _provider_label(value: str) -> str:
+    return {"fmp": "FMP", "finnhub": "Finnhub", "alpha_vantage": "Alpha Vantage"}.get(value.lower(), value)
 
 
 def build_morning_brief(user: User, watchlist: list[WatchlistItem], preferences: list[Preference]) -> str | None:
-    symbols = [w.symbol for w in watchlist][:8]
-    sectors = [p.value for p in preferences if p.key in ("sector_interest", "sector")]
-
-    quotes = [market_data.get_quote(s) for s in symbols]
-    quotes = [q.__dict__ for q in quotes if q]
-
-    news_items: list[dict] = []
-    for s in symbols[:3]:
-        news_items.extend(market_data.get_recent_news(s, limit=2))
-    if sectors:
-        news_items.extend(news_service.search_news(" OR ".join(sectors[:2]), limit=3))
-    if not symbols and not sectors:
-        news_items.extend(news_service.search_market_news(limit=5))
-
-    if not quotes and not news_items:
-        return None  # nothing to say — silence beats noise per the brief
-
-    payload = {
-        "user_role": user.role,
-        "watchlist_quotes": quotes,
-        "followed_sectors": sectors,
-        "news": news_items[:8],
-    }
-    prompt = f"Data for today's brief:\n{json.dumps(payload, default=str)[:6000]}"
-    try:
-        return gemini.generate(prompt, system_instruction=DAILY_BRIEFING_SYSTEM, temperature=0.5)
-    except Exception:
-        logger.exception("Failed to generate morning brief for user %s", user.id)
+    symbols = list(dict.fromkeys(item.symbol for item in watchlist))[:settings.max_watchlist_items]
+    if not symbols:
         return None
+    snapshots: list[str] = []
+    quote_rows: list[tuple[float, str, str, float | None]] = []
+    news_lines: list[str] = []
+    observations: list[tuple[float, str]] = []
+    sources: set[str] = set()
+    market_dates: list[str] = []
+    news_times: list[str] = []
+    upcoming: list[str] = []
+    try:
+        alert_thresholds = {
+            alert.symbol: alert.threshold_pct for alert in user.alerts
+            if alert.active and alert.kind == "pct_move" and alert.threshold_pct is not None
+        }
+    except Exception:
+        alert_thresholds = {}
+    for symbol in symbols:
+        result = gateway.get_quote(symbol, verify=False)
+        quote = result.data
+        if isinstance(quote, QuoteData) and result.status not in {DataStatus.UNAVAILABLE, DataStatus.STALE}:
+            move = f", {quote.change_pct:+.2f}%" if quote.change_pct is not None else ""
+            line = f"• {symbol}: {quote.price:,.2f} {quote.currency or ''}{move}".rstrip()
+            quote_rows.append((abs(quote.change_pct or 0), symbol, line, quote.change_pct))
+            if quote.change_pct is not None:
+                observations.append((abs(quote.change_pct), f"• {symbol}'s latest verified session move was {quote.change_pct:+.2f}%."))
+            sources.add(result.source)
+            if result.data_as_of:
+                market_dates.append(result.data_as_of.date().isoformat())
+    ranked_quotes = sorted(quote_rows, key=lambda row: row[0], reverse=True)
+    surfaced_symbols = [row[1] for row in ranked_quotes[:5]]
+    for _, symbol, _, move_pct in ranked_quotes:
+        threshold = alert_thresholds.get(symbol)
+        if threshold is not None and move_pct is not None and abs(move_pct) >= threshold and symbol not in surfaced_symbols:
+            surfaced_symbols.append(symbol)
+    line_by_symbol = {row[1]: row[2] for row in ranked_quotes}
+    snapshots = [line_by_symbol[symbol] for symbol in surfaced_symbols]
+
+    for symbol in surfaced_symbols[:5]:
+        if len(news_lines) >= 3:
+            break
+        result = gateway.get_news(symbol, 2)
+        sources.add(result.source) if result.source != "none" else None
+        for item in (result.data or []):
+            if isinstance(item, NewsItem):
+                published = item.published_at.strftime("%Y-%m-%d %H:%M UTC") if item.published_at else "time unavailable"
+                news_lines.append(f"• {symbol}: {item.headline}\n  {item.publisher or result.source} · {published}")
+                if item.published_at:
+                    news_times.append(item.published_at.strftime("%Y-%m-%d %H:%M UTC"))
+    for symbol in surfaced_symbols[:5]:
+        if len(upcoming) >= 3:
+            break
+        result = gateway.get_earnings(symbol)
+        event = result.data
+        if isinstance(event, EarningsData) and event.earnings_date and event.status in {"confirmed", "estimated"}:
+            label = "Estimated earnings" if event.status == "estimated" else "Earnings"
+            source = _provider_label(event.source or result.source)
+            if event.verified_with:
+                corroboration = "estimate corroborated by" if event.status == "estimated" else "verified with"
+                verification = f"; {corroboration} {_provider_label(event.verified_with)}"
+            else:
+                verification = ""
+            upcoming.append(
+                f"• {symbol}\n  {label}: {event.earnings_date:%b} {event.earnings_date.day}, {event.earnings_date:%Y} "
+                f"({source}{verification})"
+            )
+    if not snapshots and not news_lines:
+        return None
+    sections = ["**MORNING INTELLIGENCE**"]
+    if snapshots:
+        sections.extend(["", "**WATCHLIST SNAPSHOT**", *snapshots])
+        additional = max(0, len(symbols) - len(set(surfaced_symbols)))
+        if additional:
+            sections.append(f"{additional} additional companies monitored.")
+    if news_lines:
+        sections.extend(["", "**WHAT MATTERS**", *news_lines[:3]])
+    if upcoming:
+        sections.extend(["", "**UPCOMING**", *upcoming[:3]])
+    if observations:
+        unique = []
+        for _, line in sorted(observations, reverse=True):
+            if line not in unique:
+                unique.append(line)
+        sections.extend(["", "**ATLAS WATCH**", *unique[:2]])
+    if market_dates:
+        sections.extend(["", f"Market data — latest verified session: {max(market_dates)}"])
+    if news_times:
+        sections.append(f"News updated through: {max(news_times)}")
+    if sources:
+        sections.append(f"Sources: {', '.join(sorted(sources))}")
+    return "\n".join(sections)

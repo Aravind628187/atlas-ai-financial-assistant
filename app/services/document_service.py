@@ -13,6 +13,7 @@ import logging
 import pdfplumber
 
 from app.ai.gemini_client import gemini
+from app.ai.financial_response_validator import extract_numeric_values, validate_financial_response
 from app.ai.prompts import DOCUMENT_SUMMARY_SYSTEM
 
 logger = logging.getLogger("atlas.documents")
@@ -33,7 +34,20 @@ def extract_pdf_text(file_bytes: bytes) -> str:
 def summarize_text(extracted_text: str, filename: str) -> str:
     truncated = extracted_text[:MAX_CHARS_FOR_PROMPT]
     prompt = f"Document: {filename}\n\n{truncated}"
-    return gemini.generate(prompt, system_instruction=DOCUMENT_SUMMARY_SYSTEM, temperature=0.3)
+    allowed = extract_numeric_values(truncated)
+    response = gemini.generate(prompt, system_instruction=DOCUMENT_SUMMARY_SYSTEM, temperature=0.3)
+    verdict = validate_financial_response(response, allowed)
+    if verdict.valid:
+        return response
+    logger.warning("Blocked document summary with unsupported numeric claims: %s", verdict.unsupported_claims[:8])
+    strict_prompt = (
+        f"Summarize this document using exact numbers only when copied from DOCUMENT. "
+        f"Do not calculate or introduce examples.\n\nDOCUMENT: {filename}\n{truncated}"
+    )
+    retry = gemini.generate(strict_prompt, system_instruction=DOCUMENT_SUMMARY_SYSTEM, temperature=0.1)
+    if validate_financial_response(retry, allowed).valid:
+        return retry
+    return "I extracted the document, but I couldn't produce a summary without unsupported numerical claims. Ask a specific question and I'll answer only from the document."
 
 
 def summarize_image(image_bytes: bytes, mime_type: str, filename: str) -> str:
@@ -54,8 +68,13 @@ def answer_question_about_document(extracted_text: str, question: str) -> str:
         f"If the answer isn't in the document, say so plainly.\n\n"
         f"DOCUMENT:\n{truncated}\n\nQUESTION: {question}"
     )
-    return gemini.generate(
+    response = gemini.generate(
         prompt,
         system_instruction="You are Atlas, a financial assistant answering questions about an uploaded document.",
         temperature=0.3,
     )
+    verdict = validate_financial_response(response, extract_numeric_values(truncated))
+    if verdict.valid:
+        return response
+    logger.warning("Blocked document answer with unsupported numeric claims: %s", verdict.unsupported_claims[:8])
+    return "I couldn't verify the numerical claims needed to answer that from this document, so I won't guess."

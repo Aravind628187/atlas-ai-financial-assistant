@@ -15,7 +15,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.ai.gemini_client import gemini
+from app.ai.gemini_client import GeminiUnavailableError, gemini
 from app.ai.prompts import PERSONALIZATION_EXTRACTOR_SYSTEM
 from app.models import Message, Preference, User
 
@@ -38,7 +38,8 @@ def get_recent_history(db: Session, user: User, limit: int = HISTORY_TURNS) -> l
 
 def log_message(db: Session, user: User, role: str, content: str, intent: str | None = None, input_kind: str = "text") -> None:
     db.add(Message(user_id=user.id, role=role, content=content, intent=intent, input_kind=input_kind))
-    db.flush()
+    # Commit with the caller. Flushing before provider retrieval would hold a
+    # SQLite write lock while provider telemetry uses its own short transaction.
 
 
 def get_preferences(db: Session, user: User) -> dict[str, str]:
@@ -59,11 +60,16 @@ def upsert_preference(db: Session, user: User, key: str, value: str) -> None:
 
 def extract_and_store_personalization(db: Session, user: User, user_message: str) -> None:
     """Best-effort, non-blocking-feeling extraction of durable facts from one turn."""
+    durable_markers = ("i prefer", "i'm interested", "i am interested", "i follow", "briefing at", "keep answers", "my role")
+    if not any(marker in user_message.lower() for marker in durable_markers):
+        return
     try:
         data = gemini.generate_json(user_message, system_instruction=PERSONALIZATION_EXTRACTOR_SYSTEM)
         for fact in data.get("facts", []):
             key, value = fact.get("key"), fact.get("value")
             if key and value:
                 upsert_preference(db, user, key[:64], str(value)[:512])
+    except GeminiUnavailableError:
+        logger.info("Skipping personalization while Gemini is unavailable")
     except Exception:  # noqa: BLE001 — personalization must never break the chat flow
         logger.exception("Personalization extraction failed; continuing without it.")

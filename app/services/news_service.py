@@ -17,19 +17,29 @@ logger = logging.getLogger("atlas.news")
 
 
 def _google_news_rss(query: str, limit: int) -> list[dict]:
-    url = f"https://news.google.com/rss/search?q={quote_plus(query)}&hl=en-US&gl=US&ceid=US:en"
-    feed = feedparser.parse(url)
-    out = []
-    for entry in feed.entries[:limit]:
-        out.append(
-            {
-                "title": entry.get("title"),
-                "publisher": entry.get("source", {}).get("title") if entry.get("source") else None,
-                "link": entry.get("link"),
-                "published": entry.get("published"),
-            }
-        )
-    return out
+    try:
+        url = f"https://news.google.com/rss/search?q={quote_plus(query)}&hl=en-US&gl=US&ceid=US:en"
+        response = httpx.get(url, timeout=10, follow_redirects=True)
+        response.raise_for_status()
+        feed = feedparser.parse(response.content)
+        if getattr(feed, "bozo", False) and not feed.entries:
+            return []
+        out = []
+        for entry in feed.entries[:limit]:
+            if not entry.get("title"):
+                continue
+            out.append(
+                {
+                    "title": entry.get("title"),
+                    "publisher": entry.get("source", {}).get("title") if entry.get("source") else None,
+                    "link": entry.get("link"),
+                    "published": entry.get("published"),
+                }
+            )
+        return out
+    except Exception:
+        logger.exception("Google News RSS request failed")
+        return []
 
 
 def _newsapi(query: str, limit: int) -> list[dict]:

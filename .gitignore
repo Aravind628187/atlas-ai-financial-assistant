@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .env
 data/*.db
+data/*.db-*
 data/*.sqlite3
 .venv/
 venv/

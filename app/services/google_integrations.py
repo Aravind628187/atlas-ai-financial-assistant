@@ -1,7 +1,7 @@
 """
 Gmail / Calendar / Drive / Sheets integration.
 
-Scoped honestly for a hackathon submission: wiring a real Google OAuth
+Scoped honestly: wiring a complete Google OAuth
 consent flow requires a Google Cloud project, verified redirect URI, and
 credentials only the developer running this bot can generate — those
 can't ship inside a template. This module defines the exact contract the
@@ -10,9 +10,8 @@ real Gmail/Calendar features is a matter of:
 
   1. Create a Google Cloud project -> OAuth client (Desktop or Web)
   2. Drop GOOGLE_OAUTH_CLIENT_ID / SECRET into .env
-  3. Implement `exchange_code_for_tokens` below with `google-auth-oauthlib`
-     (left as a clear TODO so it's obvious exactly where it plugs in)
-  4. Implement the two example capabilities stubbed below
+  3. Add server-side token exchange and encrypted token persistence
+  4. Add explicitly scoped provider operations
 
 Until then, `is_configured()` is False and Atlas tells the user honestly
 that this integration isn't set up yet instead of pretending to connect.
@@ -32,7 +31,13 @@ SCOPES = {
 
 
 def is_configured() -> bool:
+    """Whether OAuth client credentials exist; this does not imply a working connection flow."""
     return settings.google_oauth_enabled
+
+
+def is_connection_available() -> bool:
+    """Token exchange is intentionally not advertised until it is implemented end to end."""
+    return False
 
 
 def build_consent_url(provider: str, telegram_id: int) -> str | None:
@@ -49,9 +54,3 @@ def build_consent_url(provider: str, telegram_id: int) -> str | None:
         "state": f"{provider}:{telegram_id}",
     }
     return f"https://accounts.google.com/o/oauth2/v2/auth?{urlencode(params)}"
-
-
-# --- TODO (next milestone, once real credentials exist) --------------------
-# def exchange_code_for_tokens(code: str) -> dict: ...
-# def summarize_recent_emails(access_token: str, company: str) -> str: ...
-# def get_upcoming_events(access_token: str) -> list[dict]: ...

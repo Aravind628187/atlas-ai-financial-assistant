@@ -22,6 +22,9 @@
   --accent-soft: rgba(52, 216, 166, 0.14);
 
   --warn: #ff5c72;
+
+  --logout-bg: rgba(52, 216, 166, 0.16);
+  --logout-border: rgba(46, 216, 166, 0.35);
   --warn-soft: rgba(255, 92, 114, 0.14);
 
   --radius: 14px;
@@ -146,6 +149,27 @@ select {
   background: rgba(9, 13, 24, 0.88);
 
   border-right: 1px solid var(--border);
+}
+
+.sidebar-logout {
+  margin-top: auto;
+  padding-top: 24px;
+}
+
+.logout-button {
+  width: 100%;
+  border: 1px solid var(--logout-border);
+  border-radius: 16px;
+  background: var(--logout-bg);
+  color: var(--text);
+  padding: 14px 16px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.logout-button:hover,
+.logout-button:focus-visible {
+  background: rgba(46, 230, 184, 0.18);
 
   backdrop-filter: blur(14px);
 

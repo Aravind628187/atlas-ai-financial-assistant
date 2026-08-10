@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Atlas OS — Mission Control Login</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/frontend/style.css" />
+</head>
+<body>
+
+  <header class="menubar">
+    <a class="menubar-brand" href="/">
+      <img src="/frontend/assets/logo.png" alt="Atlas AI logo" />
+      Atlas
+    </a>
+    <div class="menubar-spacer"></div>
+    <div class="menubar-status"><span><span class="dot-live"></span>atlasd running</span><span class="menubar-clock" id="menubar-clock">00:00:00</span></div>
+    <a class="btn btn-ghost" href="/" style="padding:8px 14px; font-size:0.76rem;">← Back to Atlas</a>
+  </header>
+
+  <main class="lock-screen">
+    <div class="lock-clock" id="lock-clock">00:00</div>
+    <div class="lock-date" id="lock-date">—</div>
+
+    <div class="lock-avatar" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>
+    </div>
+    <div class="lock-name">Mission Control — Administrator</div>
+
+    <div class="win lock-panel">
+      <div class="win-titlebar">
+        <div class="win-dots"><span></span><span></span><span></span></div>
+        <div class="win-title">login.atlas — secure</div>
+        <div class="win-meta">TLS</div>
+      </div>
+      <div class="win-body">
+        <form id="login-form" novalidate>
+          <label for="email-input">Email
+            <input id="email-input" name="email" type="email" autocomplete="username" required placeholder="you@company.com" />
+          </label>
+          <label for="password-input">Password
+            <div class="password-field">
+              <input id="password-input" name="password" type="password" autocomplete="current-password" required placeholder="••••••••" />
+              <button type="button" class="toggle-password" id="toggle-password">SHOW</button>
+            </div>
+          </label>
+          <div class="lock-status" id="login-status" role="status" aria-live="polite"></div>
+          <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">Unlock Mission Control</button>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script src="/frontend/app.js" defer></script>
+</body>
+</html>

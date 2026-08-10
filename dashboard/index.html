@@ -21,6 +21,7 @@
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <script src="/logout.js" defer></script>
 
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
@@ -112,6 +113,15 @@
         >
           <span class="nav-dot"></span>
           Briefings
+        </button>
+
+        <button
+          class="nav-item"
+          data-view="reliability"
+          type="button"
+        >
+          <span class="nav-dot"></span>
+          System Health
         </button>
 
       </nav>
@@ -353,6 +363,20 @@
 
         </div>
 
+      </section>
+
+      <section class="view" id="view-reliability">
+        <div class="view-header">
+          <h2>System Health</h2>
+          <p class="view-sub">Live provider, grounding, validation, scheduler, and alert telemetry. No demo values.</p>
+        </div>
+        <div class="grid-2">
+          <div class="card"><div class="card-head"><h3>Services</h3><span class="card-sub">current process</span></div><div class="mini-stat-row" id="health-services"></div></div>
+          <div class="card"><div class="card-head"><h3>Data quality</h3><span class="card-sub">last 24 hours</span></div><div class="mini-stat-row" id="health-data-quality"></div></div>
+          <div class="card"><div class="card-head"><h3>AI reliability</h3><span class="card-sub">last 24 hours</span></div><div class="mini-stat-row" id="health-ai"></div></div>
+          <div class="card"><div class="card-head"><h3>Alert activity</h3><span class="card-sub">actual database state</span></div><div class="mini-stat-row" id="health-alerts"></div></div>
+          <div class="card"><div class="card-head"><h3>Data providers</h3><span class="card-sub">configured and observed health</span></div><div class="mini-stat-row" id="health-providers"></div></div>
+        </div>
       </section>
 
 

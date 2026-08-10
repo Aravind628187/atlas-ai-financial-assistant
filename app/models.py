@@ -153,3 +153,31 @@ class BriefingLog(Base):
     kind: Mapped[str] = mapped_column(String(32))  # morning_brief/evening_summary/alert
     content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class DataFetchLog(Base):
+    """Provider observability without storing credentials or raw private payloads."""
+    __tablename__ = "data_fetch_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    request_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    provider: Mapped[str] = mapped_column(String(64), index=True)
+    operation: Mapped[str] = mapped_column(String(32))
+    symbol: Mapped[str | None] = mapped_column(String(24), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(24), index=True)
+    latency_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    cache_hit: Mapped[bool] = mapped_column(Boolean, default=False)
+    error_type: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class ResponseValidationLog(Base):
+    """Counts unsafe model responses without retaining secrets or provider payloads."""
+    __tablename__ = "response_validation_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    intent: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    result: Mapped[str] = mapped_column(String(24), index=True)
+    unsupported_claims: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=utcnow, index=True)

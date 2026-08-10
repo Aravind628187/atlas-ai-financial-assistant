@@ -1,18 +1,14 @@
-"""
-Live market data via yfinance (free, no API key required — chosen so the
-project runs the moment a user drops in only a Gemini key + bot token, per
-the assignment's request). Swap in Finnhub / Alpha Vantage / Polygon here
-if you have a paid key; the rest of the app only depends on this module's
-function signatures, not on yfinance itself.
+"""Backward-compatible facade over the central financial data gateway.
+
+New code should use ``financial_data_gateway.gateway`` directly. Keeping these
+functions preserves existing scheduler/API integrations and third-party imports.
 """
 from __future__ import annotations
 
-import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
-import yfinance as yf
-
-logger = logging.getLogger("atlas.market")
+from app.services.financial_data_gateway import gateway
+from app.services.providers.base import EarningsData, QuoteData
 
 
 @dataclass
@@ -24,103 +20,67 @@ class Quote:
     prev_close: float | None
     currency: str | None
     name: str | None
+    source: str | None = None
+    data_as_of: str | None = None
+    freshness: str | None = None
 
 
 def get_quote(symbol: str) -> Quote | None:
-    try:
-        t = yf.Ticker(symbol)
-        fast = t.fast_info
-        price = fast.get("lastPrice") or fast.get("last_price")
-        prev_close = fast.get("previousClose") or fast.get("previous_close")
-        if price is None:
-            return None
-        change = None if prev_close is None else price - prev_close
-        change_pct = None if not prev_close else (change / prev_close) * 100
-        name = None
-        try:
-            name = t.info.get("shortName")
-        except Exception:  # noqa: BLE001 — .info is best-effort, can be slow/flaky
-            pass
-        return Quote(
-            symbol=symbol.upper(),
-            price=round(price, 2) if price else None,
-            change=round(change, 2) if change is not None else None,
-            change_pct=round(change_pct, 2) if change_pct is not None else None,
-            prev_close=round(prev_close, 2) if prev_close else None,
-            currency=fast.get("currency"),
-            name=name,
-        )
-    except Exception:
-        logger.exception("get_quote failed for %s", symbol)
+    result = gateway.get_quote(symbol)
+    data = result.data
+    if not isinstance(data, QuoteData):
         return None
+    return Quote(
+        symbol=data.symbol, price=data.price, change=data.change,
+        change_pct=data.change_pct, prev_close=data.previous_close,
+        currency=data.currency, name=data.name, source=result.source,
+        data_as_of=result.data_as_of.isoformat() if result.data_as_of else None,
+        freshness=(result.verification or {}).get("freshness"),
+    )
 
 
 def get_company_profile(symbol: str) -> dict:
-    try:
-        t = yf.Ticker(symbol)
-        info = t.info or {}
-        return {
-            "symbol": symbol.upper(),
-            "name": info.get("shortName") or info.get("longName"),
-            "sector": info.get("sector"),
-            "industry": info.get("industry"),
-            "summary": info.get("longBusinessSummary"),
-            "market_cap": info.get("marketCap"),
-            "pe_ratio": info.get("trailingPE"),
-            "forward_pe": info.get("forwardPE"),
-            "dividend_yield": info.get("dividendYield"),
-            "52w_high": info.get("fiftyTwoWeekHigh"),
-            "52w_low": info.get("fiftyTwoWeekLow"),
-            "employees": info.get("fullTimeEmployees"),
-            "website": info.get("website"),
-            "revenue_growth": info.get("revenueGrowth"),
-            "profit_margin": info.get("profitMargins"),
-        }
-    except Exception:
-        logger.exception("get_company_profile failed for %s", symbol)
-        return {"symbol": symbol.upper()}
+    profile = gateway.get_profile(symbol)
+    fundamentals = gateway.get_fundamentals(symbol)
+    output = {"symbol": symbol.upper(), "source": profile.source}
+    if profile.data:
+        output.update(asdict(profile.data))
+    if fundamentals.data:
+        output.update(asdict(fundamentals.data))
+    return output
 
 
 def get_recent_news(symbol: str, limit: int = 5) -> list[dict]:
-    try:
-        t = yf.Ticker(symbol)
-        items = t.news or []
-        out = []
-        for it in items[:limit]:
-            content = it.get("content", it)  # yfinance schema has shifted across versions
-            out.append(
-                {
-                    "title": content.get("title") or it.get("title"),
-                    "publisher": (content.get("provider") or {}).get("displayName")
-                    if isinstance(content.get("provider"), dict)
-                    else it.get("publisher"),
-                    "link": (content.get("canonicalUrl") or {}).get("url") if isinstance(content.get("canonicalUrl"), dict) else it.get("link"),
-                    "published": content.get("pubDate") or it.get("providerPublishTime"),
-                }
-            )
-        return [n for n in out if n.get("title")]
-    except Exception:
-        logger.exception("get_recent_news failed for %s", symbol)
-        return []
+    result = gateway.get_news(symbol, limit)
+    return [
+        {
+            "news_id": item.news_id, "title": item.headline, "publisher": item.publisher,
+            "published": item.published_at.isoformat() if item.published_at else None,
+            "link": item.url, "summary": item.summary, "source": result.source,
+        }
+        for item in (result.data or [])
+    ]
 
 
 def get_earnings_calendar(symbol: str) -> dict:
-    try:
-        t = yf.Ticker(symbol)
-        cal = t.calendar
-        if isinstance(cal, dict):
-            return {"symbol": symbol.upper(), "earnings_date": cal.get("Earnings Date")}
-        return {"symbol": symbol.upper(), "earnings_date": None}
-    except Exception:
-        logger.exception("get_earnings_calendar failed for %s", symbol)
-        return {"symbol": symbol.upper(), "earnings_date": None}
+    result = gateway.get_earnings(symbol)
+    event = result.data if isinstance(result.data, EarningsData) else None
+    displayable = bool(event and event.earnings_date and event.status in {"confirmed", "estimated"})
+    return {
+        "symbol": symbol.upper(),
+        "earnings_date": event.earnings_date.isoformat() if displayable else None,
+        "status": event.status if event else "unverified",
+        "source": (event.source or result.source) if event else result.source,
+        "verified_with": event.verified_with if event else None,
+        "data_as_of": result.data_as_of.isoformat() if result.data_as_of else None,
+    }
 
 
 def compare_symbols(symbols: list[str]) -> list[dict]:
-    results = []
-    for s in symbols:
-        quote = get_quote(s)
-        profile = get_company_profile(s)
-        profile["quote"] = quote.__dict__ if quote else None
-        results.append(profile)
-    return results
+    output = []
+    for symbol in symbols:
+        row = get_company_profile(symbol)
+        quote = get_quote(symbol)
+        row["quote"] = asdict(quote) if quote else None
+        output.append(row)
+    return output

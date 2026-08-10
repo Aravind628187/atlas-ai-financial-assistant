@@ -11,7 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Alert
-from app.services.market_data import get_quote
+from app.services.financial_data_gateway import gateway
+from app.services.providers.base import DataStatus, QuoteData
 
 logger = logging.getLogger("atlas.alerts")
 
@@ -24,8 +25,9 @@ def evaluate_alerts(db: Session) -> list[tuple[Alert, str]]:
     alerts = db.execute(select(Alert).where(Alert.active.is_(True))).scalars().all()
 
     for alert in alerts:
-        quote = get_quote(alert.symbol)
-        if not quote or quote.change_pct is None:
+        result = gateway.get_quote(alert.symbol)
+        quote = result.data
+        if result.status in {DataStatus.UNAVAILABLE, DataStatus.STALE} or not isinstance(quote, QuoteData) or quote.change_pct is None:
             continue
 
         threshold = alert.threshold_pct or DEFAULT_THRESHOLD_PCT
@@ -40,7 +42,9 @@ def evaluate_alerts(db: Session) -> list[tuple[Alert, str]]:
         direction_word = "up 📈" if quote.change_pct > 0 else "down 📉"
         message = (
             f"⚡ **{alert.symbol}** just moved **{quote.change_pct:+.2f}%** {direction_word} "
-            f"to **{quote.price} {quote.currency or ''}**. Crossed your {threshold:.0f}% alert threshold."
+            f"to **{quote.price} {quote.currency or ''}**. Crossed your {threshold:.0f}% alert threshold.\n"
+            f"As of: {result.data_as_of.strftime('%Y-%m-%d %H:%M UTC') if result.data_as_of else 'unavailable'}\n"
+            f"Source: {result.source}"
         )
         alert.last_triggered_price = quote.price
         alert.last_triggered_at = dt.datetime.utcnow()

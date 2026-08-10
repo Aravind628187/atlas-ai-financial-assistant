@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#070b12" />
+  <title>Atlas AI — Financial Intelligence in Telegram</title>
+  <meta name="description" content="Atlas AI combines verified market data, company research, SEC filings, news, watchlists and proactive alerts inside Telegram." />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Atlas AI — Financial Intelligence in Telegram" />
+  <meta property="og:description" content="Verified market intelligence, company research, filings, watchlists and proactive alerts—delivered inside Telegram." />
+  <link rel="stylesheet" href="/frontend/style.css" />
+  <script src="/frontend/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+
+  <header class="site-header" id="site-header">
+    <nav class="nav-shell" aria-label="Primary navigation">
+      <a class="brand" href="#top" aria-label="Atlas AI home">
+        <img src="/frontend/assets/logo.png" alt="" width="34" height="34" />
+        <span>ATLAS <b>AI</b></span>
+      </a>
+      <button class="nav-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" aria-label="Open navigation">
+        <span></span><span></span>
+      </button>
+      <div class="nav-links" id="nav-links">
+        <a href="#intelligence">Intelligence</a>
+        <a href="#companies">Top Companies</a>
+        <a href="#network">Data Network</a>
+        <a href="#capabilities">Capabilities</a>
+        <a href="#how-it-works">How It Works</a>
+      </div>
+      <a class="nav-cta telegram-cta" href="#telegram" aria-label="Open Atlas on Telegram">Open Telegram <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+
+  <main id="main-content">
+    <section class="hero" id="top">
+      <div class="hero-grid" aria-hidden="true"></div>
+      <div class="hero-glow hero-glow-one" aria-hidden="true"></div>
+      <div class="hero-glow hero-glow-two" aria-hidden="true"></div>
+      <div class="container hero-layout">
+        <div class="hero-copy" data-reveal>
+          <div class="section-label"><span class="pulse-dot"></span> Telegram-first financial intelligence</div>
+          <h1>Know what matters<br /><em>before you need to ask.</em></h1>
+          <p class="hero-lede">Atlas combines verified market data, company research, official filings, relevant news, watchlists, alerts and personalized briefings—inside Telegram.</p>
+          <div class="hero-actions">
+            <a class="button button-primary telegram-cta" href="#telegram">Open Atlas on Telegram <span aria-hidden="true">↗</span></a>
+            <a class="button button-secondary" href="#intelligence">Explore intelligence <span aria-hidden="true">↓</span></a>
+          </div>
+          <div class="trust-row" aria-label="Atlas product facts">
+            <div><strong id="source-count">7</strong><span>financial sources</span></div>
+            <div><strong id="watchlist-limit">25</strong><span>company watchlist limit</span></div>
+            <div><strong>SEC</strong><span>official EDGAR filings</span></div>
+          </div>
+        </div>
+
+        <div class="hero-visual" data-reveal>
+          <div class="launch-beam" aria-hidden="true"></div>
+          <div class="telegram-launch-card">
+            <div class="launch-header">
+              <div class="launch-identity">
+                <img src="/frontend/assets/logo.png" alt="" width="42" height="42" />
+                <div><strong>Atlas AI</strong><span>Financial intelligence bot</span></div>
+              </div>
+              <span class="launch-online"><i></i> Telegram ready</span>
+            </div>
+            <div class="launch-body">
+              <a class="qr-frame telegram-cta" href="#telegram" aria-label="Open Atlas AI on Telegram">
+                <img class="telegram-qr" src="/api/public/telegram-qr" alt="QR code to open Atlas AI on Telegram" width="224" height="224" />
+                <span>SCAN TO OPEN</span>
+              </a>
+              <div class="launch-copy">
+                <span class="launch-kicker">YOUR MARKET DESK · IN TELEGRAM</span>
+                <h2>Ask less.<br />Know sooner.</h2>
+                <p>Scan once. Atlas is ready for questions, watchlists, alerts and morning intelligence.</p>
+                <div class="launch-flow" aria-label="How Atlas works">
+                  <div><b>01</b><span>Ask naturally</span></div>
+                  <div><b>02</b><span>Atlas verifies</span></div>
+                  <div><b>03</b><span>Act with context</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="launch-footer">
+              <span><i></i> Multi-source routing active</span>
+              <span>US market · <b id="hero-market-status">Connecting</b></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="market-tape" aria-label="Latest public market data">
+      <div class="market-tape-label"><span>ATLAS / MARKET</span><b id="tape-status">Loading latest data</b></div>
+      <div class="market-tape-track" id="market-tape-track"><span>Verified values load from Atlas providers.</span></div>
+    </div>
+
+    <section class="section market-section" id="intelligence">
+      <div class="container">
+        <div class="section-heading split-heading" data-reveal>
+          <div>
+            <div class="section-label">Live / latest market intelligence</div>
+            <h2>A high-signal view of the market.</h2>
+          </div>
+          <div class="market-pill is-loading" id="market-pill" role="status" aria-live="polite">
+            <span>US MARKET</span><b>LOADING</b>
+          </div>
+        </div>
+        <div class="market-grid" id="market-grid" aria-live="polite" aria-busy="true">
+          <div class="market-card skeleton-card"></div><div class="market-card skeleton-card"></div>
+          <div class="market-card skeleton-card"></div><div class="market-card skeleton-card"></div>
+        </div>
+        <p class="data-note" id="market-note">Financial values are retrieved from Atlas providers. No value is generated by the page.</p>
+      </div>
+    </section>
+
+    <section class="section companies-section" id="companies">
+      <div class="container">
+        <div class="section-heading split-heading" data-reveal>
+          <div>
+            <div class="section-label">Ranked intelligence</div>
+            <h2>Top companies Atlas is watching.</h2>
+            <p>A compact public view of the current market-cap ranking available to Atlas. Quote values appear only when the backend returns usable data.</p>
+          </div>
+          <div class="ranking-source is-loading" id="ranking-source"><span></span>Retrieving ranking</div>
+        </div>
+        <div class="companies-grid" id="companies-grid" aria-live="polite" aria-busy="true">
+          <div class="company-card skeleton-card"></div><div class="company-card skeleton-card"></div><div class="company-card skeleton-card"></div>
+          <div class="company-card skeleton-card"></div><div class="company-card skeleton-card"></div><div class="company-card skeleton-card"></div>
+        </div>
+        <div class="ranking-footer">
+          <span id="ranking-time">Ranking retrieval in progress.</span>
+          <a href="#top-companies-feature">How Top Companies works <span aria-hidden="true">→</span></a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section network-section" id="network">
+      <div class="container">
+        <div class="section-heading centered" data-reveal>
+          <div class="section-label">Multi-source verification</div>
+          <h2>The right source for every question.</h2>
+          <p>Atlas routes each request to the financial provider suited to that task, verifies critical values when possible, and refuses to fill missing facts with model memory.</p>
+        </div>
+
+        <div class="router-map" data-reveal>
+          <div class="router-column router-inputs">
+            <div class="router-node"><b>FINNHUB</b><span>Primary quotes</span></div>
+            <div class="router-node"><b>TWELVE DATA</b><span>Verification · history</span></div>
+            <div class="router-node"><b>FMP</b><span>Fundamentals · rankings</span></div>
+          </div>
+          <div class="router-lines" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div class="router-core"><img src="/frontend/assets/logo.png" alt="" /><strong>ATLAS ROUTER</strong><span>intent-aware</span><span>fail-closed</span></div>
+          <div class="router-lines reverse" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div class="router-column router-outputs">
+            <div class="router-node"><b>ALPHA VANTAGE</b><span>Fundamentals fallback</span></div>
+            <div class="router-node"><b>NEWSAPI</b><span>Company news</span></div>
+            <div class="router-node"><b>SEC EDGAR</b><span>Official filings</span></div>
+          </div>
+        </div>
+
+        <div class="provider-panel" data-reveal>
+          <div class="panel-header"><div><span>DATA NETWORK</span><b>Public connection summary</b></div><small>Safe telemetry only</small></div>
+          <div class="provider-list" id="provider-list" aria-live="polite" aria-busy="true">
+            <div class="provider-row skeleton-line"></div><div class="provider-row skeleton-line"></div><div class="provider-row skeleton-line"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section capabilities-section" id="capabilities">
+      <div class="container">
+        <div class="section-heading" data-reveal>
+          <div class="section-label">Financial operating layer</div>
+          <h2>One assistant. Six focused workflows.</h2>
+        </div>
+        <div class="capability-grid">
+          <article class="capability-card" data-reveal><span>01</span><div class="icon-frame">⌁</div><h3>Market intelligence</h3><p>Real or latest-available quotes, historical performance and backend-derived market status.</p><small>QUOTES · HISTORY · SESSION</small></article>
+          <article class="capability-card" data-reveal><span>02</span><div class="icon-frame">◫</div><h3>Company research</h3><p>Equivalent valuation, margin, growth and revenue definitions across financial providers.</p><small>FUNDAMENTALS · COMPARISONS</small></article>
+          <article class="capability-card" data-reveal><span>03</span><div class="icon-frame">◎</div><h3>Smart watchlists</h3><p>Track personal symbols or dynamically ranked U.S. companies without duplicate share classes.</p><small>TOP 5 · 10 · 15 · 20</small></article>
+          <article class="capability-card" data-reveal><span>04</span><div class="icon-frame">⌁</div><h3>Proactive alerts</h3><p>Percentage-movement monitoring with deduplicated notifications sent through Telegram.</p><small>THRESHOLDS · NOTIFICATIONS</small></article>
+          <article class="capability-card" data-reveal><span>05</span><div class="icon-frame">☼</div><h3>Morning intelligence</h3><p>Important moves, relevant news and upcoming events—compacted to surface signal, not noise.</p><small>MOVERS · NEWS · EVENTS</small></article>
+          <article class="capability-card" data-reveal><span>06</span><div class="icon-frame">▤</div><h3>SEC & document intelligence</h3><p>Official EDGAR filings, financial PDFs, image understanding and grounded document Q&amp;A.</p><small>FILINGS · PDF · VOICE · IMAGE</small></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section top-feature-section" id="top-companies-feature">
+      <div class="container top-feature-layout">
+        <div class="top-feature-copy" data-reveal>
+          <div class="section-label">Top Companies Watchlist</div>
+          <h2>Track the biggest companies automatically.</h2>
+          <p>Atlas retrieves a dynamic market-cap ranking when the configured plan supports it. If not, it uses a clearly labeled reference ranking—never a disguised “live” list.</p>
+          <ul class="check-list">
+            <li>Dynamic ranking where available</li>
+            <li>GOOG / GOOGL duplicate prevention</li>
+            <li>Provider-aware ticker validation</li>
+            <li>Briefing compaction across larger lists</li>
+          </ul>
+        </div>
+        <div class="command-card" data-reveal>
+          <div class="command-top"><span>TELEGRAM / NATURAL LANGUAGE</span><i></i></div>
+          <div class="message user-message">Track the top 15 U.S. companies.</div>
+          <div class="message atlas-message"><b>Atlas</b><p>I’ll retrieve the latest available ranking, validate each ticker, prevent duplicate share classes and add only the missing companies.</p></div>
+          <div class="command-facts"><span>Maximum watchlist</span><b id="command-watchlist-limit">25 companies</b></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section telegram-section" id="how-it-works">
+      <div class="container">
+        <div class="section-heading centered" data-reveal>
+          <div class="section-label">The Telegram experience</div>
+          <h2>Ask naturally. Atlas handles the routing.</h2>
+          <p>The website explains the system. Telegram is where the real interaction happens.</p>
+        </div>
+        <div class="conversation-shell" data-reveal>
+          <div class="conversation-header"><img src="/frontend/assets/logo.png" alt="" /><div><b>Atlas AI</b><span>Financial intelligence</span></div><i></i></div>
+          <div class="conversation-body">
+            <div class="chat-row chat-user"><p>What’s moving Nvidia today?</p></div>
+            <div class="chat-row chat-atlas"><span>ATLAS</span><p>NVDA’s latest verified move is available from my market providers. I found relevant developments, but I won’t claim a catalyst unless I can verify it.</p><small>Source-grounded response</small></div>
+            <div class="chat-row chat-user"><p>Compare Nvidia and AMD.</p></div>
+            <div class="chat-row chat-atlas"><span>ATLAS</span><p>I’ll compare equivalent valuation, margin and revenue metrics from verified financial sources.</p><small>Definitions aligned before comparison</small></div>
+            <div class="chat-row chat-user"><p>Alert me if Nvidia moves more than 5%.</p></div>
+            <div class="chat-row chat-atlas"><span>ATLAS</span><p>Alert created.</p><small>Monitoring begins only when requested</small></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section briefing-section">
+      <div class="container briefing-layout">
+        <div class="briefing-preview" data-reveal>
+          <div class="briefing-header"><span>PUBLIC MARKET BRIEF / STRUCTURE</span><b>MORNING INTELLIGENCE</b></div>
+          <div class="briefing-block"><span>WATCHLIST MOVERS</span><p>Largest verified moves and alert-triggering companies.</p></div>
+          <div class="briefing-block"><span>WHAT MATTERS</span><p>Up to three strongly relevant retrieved news items.</p></div>
+          <div class="briefing-block"><span>UPCOMING</span><p>Confirmed or clearly labeled estimated events only.</p></div>
+          <div class="briefing-block"><span>ATLAS WATCH</span><p>Evidence-based observations, never predictions.</p></div>
+        </div>
+        <div class="briefing-copy" data-reveal>
+          <div class="section-label">Morning intelligence</div>
+          <h2>Atlas monitors everything.<br />You see what matters.</h2>
+          <p>Large watchlists do not become giant reports. Atlas evaluates the monitored set, then surfaces the largest moves, the most relevant reporting and only defensible upcoming events.</p>
+          <div class="signal-limits"><div><b>05</b><span>largest movers</span></div><div><b>03</b><span>material stories</span></div><div><b>02</b><span>Atlas observations</span></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section accuracy-section">
+      <div class="container accuracy-layout">
+        <div class="accuracy-title" data-reveal><div class="section-label">Financial reliability</div><h2>Built to say<br /><q>I don’t know.</q></h2><p>That is a feature—not a failure—when reliable financial data is unavailable or contradictory.</p></div>
+        <div class="accuracy-rules" data-reveal>
+          <div><span>01</span><p><b>No verified data</b>No number.</p></div>
+          <div><span>02</span><p><b>No verified catalyst</b>No causal claim.</p></div>
+          <div><span>03</span><p><b>Market closed</b>Latest available, never “live.”</p></div>
+          <div><span>04</span><p><b>Provider conflict</b>No definitive value.</p></div>
+          <div><span>05</span><p><b>SEC filings</b>Official EDGAR source.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="final-cta" id="telegram">
+      <div class="final-grid" aria-hidden="true"></div>
+      <div class="container final-cta-inner" data-reveal>
+        <a class="final-qr-link telegram-cta" href="#telegram" aria-label="Scan or select to open Atlas AI on Telegram">
+          <img class="telegram-qr" src="/api/public/telegram-qr" alt="QR code to open Atlas AI on Telegram" width="132" height="132" />
+          <span>Scan to open Atlas</span>
+        </a>
+        <div class="section-label">Atlas lives inside Telegram</div>
+        <h2>Financial intelligence<br />that comes to you.</h2>
+        <p>Ask. Track. Compare. Get briefed.</p>
+        <div class="hero-actions">
+          <a class="button button-primary telegram-cta" href="#telegram">Open Atlas on Telegram <span aria-hidden="true">↗</span></a>
+          <a class="button button-secondary" href="/login">Mission Control / Admin Login</a>
+        </div>
+        <small id="telegram-status">Loading public Telegram link…</small>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div class="footer-brand"><img src="/frontend/assets/logo.png" alt="" width="30" height="30" /><span>ATLAS AI</span></div>
+      <p>Telegram-first, source-grounded financial intelligence.</p>
+      <div><a href="/login">Admin Login</a><span>Educational product · Not financial advice</span></div>
+    </div>
+  </footer>
+</body>
+</html>

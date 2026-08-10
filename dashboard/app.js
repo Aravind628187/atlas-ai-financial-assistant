@@ -999,6 +999,43 @@ async function loadBriefings() {
     .join("");
 }
 
+function metric(label, value) {
+  return `<div class="mini-stat"><b>${escapeHtml(value ?? "—")}</b><span>${escapeHtml(label)}</span></div>`;
+}
+
+async function loadReliability() {
+  const [health, market, reliability] = await Promise.all([
+    getJSON("/health"), getJSON("/health/market-data"), getJSON("/reliability")
+  ]);
+  const services = el("#health-services");
+  const quality = el("#health-data-quality");
+  const ai = el("#health-ai");
+  const alerts = el("#health-alerts");
+  const providers = el("#health-providers");
+  if (services && health) services.innerHTML = [
+    metric("Database", health.database), metric("Gemini", health.gemini),
+    metric("Market provider", health.market_provider), metric("Scheduler", health.scheduler)
+  ].join("");
+  if (quality && reliability) quality.innerHTML = [
+    metric("Fetches", reliability.data_quality.fetches_24h),
+    metric("Provider errors", reliability.data_quality.provider_errors_24h),
+    metric("Stale results", reliability.data_quality.stale_results_24h),
+    metric("Cache entries", market?.cache?.active_entries ?? 0)
+  ].join("");
+  if (ai && reliability) ai.innerHTML = [
+    metric("Deterministic", reliability.ai_reliability.deterministic_responses_24h),
+    metric("Blocked", reliability.ai_reliability.responses_blocked_24h)
+  ].join("");
+  if (alerts && reliability) alerts.innerHTML = [
+    metric("Active", reliability.alert_activity.active_alerts),
+    metric("Triggered", reliability.alert_activity.triggered_alerts),
+    metric("Last check", timeAgo(reliability.alert_activity.last_alert_check))
+  ].join("");
+  if (providers && market?.router?.providers) providers.innerHTML = Object.entries(market.router.providers)
+    .map(([name, state]) => metric(name.replaceAll("_", " "), state.status))
+    .join("");
+}
+
 
 // ============================================================
 // LIVE DATA REFRESH
@@ -1027,6 +1064,7 @@ async function refreshDashboard() {
     loadUsers(),
 
     loadBriefings(),
+    loadReliability(),
   ]);
 }
 
